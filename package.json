@@ -7,15 +7,10 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "postinstall": "pip install streamlink --break-system-packages || pip3 install streamlink --break-system-packages || true"
   },
-  "keywords": [
-    "twitch",
-    "bot",
-    "ai",
-    "chat",
-    "viewers"
-  ],
+  "keywords": ["twitch", "bot", "ai", "chat", "viewers"],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -34,6 +29,8 @@
     "@types/fluent-ffmpeg": "^2.1.27",
     "@types/node": "^20.11.19",
     "@types/tmi.js": "^1.8.6",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
     "typescript": "^4.9.5"

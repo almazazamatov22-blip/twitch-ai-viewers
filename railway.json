@@ -1,7 +1,6 @@
 {
   "build": {
-    "builder": "NIXPACKS",
-    "buildCommand": "pip install streamlink && npm install && npm run build"
+    "builder": "NIXPACKS"
   },
   "deploy": {
     "startCommand": "npm start"

@@ -153,42 +153,29 @@ export class AIService extends EventEmitter {
   }
 
   public async startVoiceCapture(channel: string): Promise<void> {
-    if (this.isCapturing) {
-      return;
-    }
+    if (this.isCapturing) return;
 
+    const channelName = channel.startsWith('https://www.twitch.tv/')
+      ? channel.split('/').pop()!
+      : channel;
+
+    if (!channelName) throw new Error('Invalid channel name');
+    logger.info('Starting voice capture for channel:', channelName);
+
+    // Get channel info but do NOT block on isLive check
     try {
-      const channelName = channel.startsWith('https://www.twitch.tv/')
-        ? channel.split('/').pop()
-        : channel;
-
-      if (!channelName) {
-        throw new Error('Invalid channel name');
-      }
-
-      logger.info('Starting voice capture for channel:', channelName);
-
-      // Получаем инфо о канале — но НЕ блокируем запуск если оффлайн
-      try {
-        this.currentChannelInfo = await this.getChannelInfo(channelName);
-        if (!this.currentChannelInfo.isLive) {
-          logger.warn(`Channel "${channelName}" appears offline per API, but will try to capture anyway`);
-        }
-      } catch (infoErr) {
-        logger.warn('Could not get channel info, proceeding anyway:', infoErr);
-      }
-
-      this.isCapturing = true;
-      this.captureLoop(channelName).catch(error => {
-        logger.error('Error in capture loop:', error);
-        this.isCapturing = false;
-        // Retry after 60s
-        setTimeout(() => this.startVoiceCapture(channel), 60000);
-      });
-    } catch (error) {
-      logger.error('Error starting voice capture:', error);
-      throw error;
+      this.currentChannelInfo = await this.getChannelInfo(channelName);
+    } catch (e) {
+      logger.warn('Could not fetch channel info, proceeding anyway');
     }
+
+    this.isCapturing = true;
+    this.captureLoop(channelName).catch(error => {
+      logger.error('Error in capture loop:', error);
+      this.isCapturing = false;
+      logger.info('Will retry voice capture in 60 seconds...');
+      setTimeout(() => this.startVoiceCapture(channelName), 60000);
+    });
   }
 
   private async captureLoop(channel: string): Promise<void> {
@@ -556,131 +543,55 @@ export class AIService extends EventEmitter {
 
   private async getStreamUrl(channelName: string): Promise<string> {
     const { execSync } = require('child_process');
-    // 1. Streamlink (fastest, most reliable)
+
+    // Method 1: streamlink (installed via pip in build)
     try {
       const url = execSync(
         `streamlink --stream-url https://www.twitch.tv/${channelName} best 2>/dev/null`,
         { timeout: 30000 }
       ).toString().trim();
-      if (url?.startsWith('http')) {
+      if (url && url.startsWith('http')) {
         logger.info('Got stream URL via streamlink');
         return url;
       }
     } catch (_e) {
-      logger.warn('streamlink not available or failed, trying HLS fallback');
+      logger.warn('streamlink failed, trying API fallback');
     }
 
-    // 2. Direct HLS fallback
-    if (!this.accessToken) this.accessToken = await this.generateAccessToken();
-    const userResp = await axios.get(`https://api.twitch.tv/helix/users?login=${channelName}`, {
-      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${this.accessToken}` }
-    });
-    const userId = userResp.data.data[0]?.id;
-    if (!userId) throw new Error(`User ${channelName} not found`);
-
-    const streamResp = await axios.get(`https://api.twitch.tv/helix/streams?user_id=${userId}`, {
-      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${this.accessToken}` }
-    });
-    if (!streamResp.data.data[0]) throw new Error(`Channel ${channelName} is not live`);
-
-    const hlsUrl = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?allow_source=true&allow_spectre=true`;
-    logger.info('Using HLS fallback URL');
-    return hlsUrl;
-  }
-
-  private async getStreamUrl_unused(channel: string): Promise<string> {
+    // Method 2: Twitch API token + usher URL
     try {
-      // Extract channel name from URL if it's a full URL
-      const channelName = channel.startsWith('https://www.twitch.tv/')
-        ? channel.split('/').pop()
-        : channel;
-
-      if (!channelName) {
-        throw new Error('Invalid channel name');
-      }
-
-      // Generate new access token if not available
       if (!this.accessToken) {
         this.accessToken = await this.generateAccessToken();
       }
 
-      // First, check if the channel exists
-      const userResponse = await axios.get(`https://api.twitch.tv/helix/users?login=${channelName}`, {
+      const userResp = await axios.get(`https://api.twitch.tv/helix/users?login=${channelName}`, {
         headers: {
           'Client-ID': process.env.TWITCH_CLIENT_ID,
           'Authorization': `Bearer ${this.accessToken}`
         }
       });
 
-      if (userResponse.data.data.length === 0) {
-        throw new Error(`Channel "${channelName}" does not exist`);
-      }
+      const userId = userResp.data.data[0]?.id;
+      if (!userId) throw new Error('User not found');
 
-      const userId = userResponse.data.data[0].id;
-
-      // Then check if the stream is live and get stream info
-      const streamResponse = await axios.get(`https://api.twitch.tv/helix/streams?user_id=${userId}`, {
+      const streamResp = await axios.get(`https://api.twitch.tv/helix/streams?user_id=${userId}`, {
         headers: {
           'Client-ID': process.env.TWITCH_CLIENT_ID,
           'Authorization': `Bearer ${this.accessToken}`
         }
       });
 
-      if (streamResponse.data.data.length === 0) {
-        throw new Error(`Channel "${channelName}" is not currently live`);
+      if (!streamResp.data.data[0]) {
+        throw new Error(`Channel ${channelName} is not live according to API`);
       }
 
-      // Get the stream access token and signature using the new endpoint
-      const tokenResponse = await axios.post(`https://gql.twitch.tv/gql`, {
-        operationName: "PlaybackAccessToken",
-        variables: {
-          isLive: true,
-          login: channelName,
-          isVod: false,
-          vodID: "",
-          playerType: "site"
-        },
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash: "0828119ded1c13477966434e15800ff57ddacf13ba1911c129dc2200705b0712"
-          }
-        }
-      }, {
-        headers: {
-          'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-
-      if (!tokenResponse.data.data?.streamPlaybackAccessToken) {
-        throw new Error('Failed to get stream access token');
-      }
-
-      const { value: token, signature } = tokenResponse.data.data.streamPlaybackAccessToken;
-
-      if (!token || !signature) {
-        throw new Error('Invalid token or signature received');
-      }
-
-      // Get the stream URL from the stream info
-      return `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?client_id=kimne78kx3ncx6brgo4mv6wki5h1ko&token=${encodeURIComponent(token)}&sig=${signature}`;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        if (error.response?.status === 401) {
-          // Try to generate a new token and retry
-          this.accessToken = await this.generateAccessToken();
-          return this.getStreamUrl(channel);
-        } else if (error.response?.status === 404) {
-          logger.error('Channel not found. Please check the channel name.');
-        } else {
-          logger.error('Error getting stream URL:', error.message);
-        }
-      } else {
-        logger.error('Error getting stream URL:', error);
-      }
-      throw error;
+      // Use the token we already have for HLS auth
+      const hlsUrl = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?allow_source=true&sig=&token=&allow_spectre=true`;
+      logger.info('Using HLS URL with API token');
+      return hlsUrl;
+    } catch (err) {
+      logger.error('API fallback failed:', err);
+      throw err;
     }
   }
 } 

@@ -1,5 +1,0 @@
-[phases.install]
-cmds = ["npm install", "pip install streamlink --break-system-packages || pip3 install streamlink || true"]
-
-[phases.build]
-cmds = ["npm run build"]

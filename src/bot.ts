@@ -20,13 +20,12 @@ export class Bot {
   private reconnectAttempts: number = 0;
   private readonly MAX_RECONNECT_ATTEMPTS = 5;
   private botIndex: number;
+  private channelName: string;
 
-  // Ручные сообщения — минимальная пауза 300мс
   private manualQueue: string[] = [];
   private isSendingManual: boolean = false;
-  private readonly MANUAL_DELAY = 300;
+  private readonly MANUAL_DELAY = 350;
 
-  // AI сообщения — пауза из MESSAGE_INTERVAL
   private aiQueue: string[] = [];
   private isSendingAI: boolean = false;
 
@@ -34,6 +33,7 @@ export class Bot {
     this.aiService = config.aiService;
     this.shouldHandleVoiceCapture = config.shouldHandleVoiceCapture || false;
     this.botIndex = config.botIndex;
+    this.channelName = config.channel;
 
     if (!config.oauth.startsWith('oauth:')) {
       throw new Error(`Invalid OAuth token for bot ${config.username}. Must start with 'oauth:'`);
@@ -49,61 +49,56 @@ export class Bot {
     this.setupEventHandlers();
 
     if (this.shouldHandleVoiceCapture) {
-      this.setupVoiceCapture(config.channel).catch(error => {
-        logger.error(`Error setting up voice capture for bot ${config.username}:`, error);
-      });
+      this.setupVoiceCapture(config.channel).catch(err =>
+        logger.error(`Voice capture setup error for ${config.username}:`, err)
+      );
     }
   }
 
   private setupEventHandlers(): void {
     if (!this.client) return;
 
-    this.client.on('message', async (_channel: string, tags: tmi.ChatUserstate, message: string, self: boolean) => {
-      if (self) return;
-
-      const username = tags['display-name'] || tags.username || 'viewer';
-      const channelName = (process.env.TWITCH_CHANNEL || '')
-        .toLowerCase().replace('https://www.twitch.tv/', '').replace(/\/$/, '');
-      const isStreamer = tags.username?.toLowerCase() === channelName;
-
-      // Только первый бот пробрасывает входящие (чтобы не дублировать)
-      if (this.botIndex === 0) {
+    // Only first bot forwards incoming chat to dashboard (avoid duplicates)
+    if (this.botIndex === 0) {
+      this.client.on('message', (_ch, tags, message, self) => {
+        if (self) return;
+        const username = tags['display-name'] || tags.username || 'viewer';
+        const isStreamer = tags.username?.toLowerCase() === this.channelName.toLowerCase();
         this.aiService.emit('incomingChat', { username, message, isStreamer, color: tags.color || null });
-      }
 
-      if (Math.random() < 0.2) {
-        const context = {
-          chatMessage: message, username,
-          messageCount: this.messageCount, isChatMessage: true,
-        };
-        this.aiService.emit('chatMessage', JSON.stringify(context));
-      }
-    });
+        if (Math.random() < 0.2) {
+          this.aiService.emit('chatMessage', JSON.stringify({
+            chatMessage: message, username, messageCount: this.messageCount
+          }));
+        }
+      });
+    }
 
-    this.client.on('connected', (address: string, port: number) => {
+    this.client.on('connected', (address, port) => {
       this.isConnected = true;
       this.reconnectAttempts = 0;
-      logger.info(`Bot ${this.client?.getUsername()} connected at ${address}:${port}`);
+      logger.info(`Bot[${this.botIndex}] ${this.client?.getUsername()} connected at ${address}:${port}`);
     });
 
-    this.client.on('disconnected', (reason: string) => {
+    this.client.on('disconnected', reason => {
       this.isConnected = false;
-      logger.warn(`Bot ${this.client?.getUsername()} disconnected: ${reason}`);
+      logger.warn(`Bot[${this.botIndex}] ${this.client?.getUsername()} disconnected: ${reason}`);
     });
 
-    this.client.on('logon', () => {
-      logger.info(`Bot ${this.client?.getUsername()} logged in`);
-    });
+    this.client.on('logon', () =>
+      logger.info(`Bot[${this.botIndex}] ${this.client?.getUsername()} logged in`)
+    );
 
-    // Каждый бот слушает СВОЙ event: manualMessage_0, manualMessage_1, ...
+    // Each bot listens to its own manual channel: manualMessage_0, manualMessage_1, ...
     this.aiService.on(`manualMessage_${this.botIndex}`, (message: string) => {
       if (message?.trim()) {
+        logger.info(`Bot[${this.botIndex}] queuing manual: "${message}"`);
         this.manualQueue.push(message);
         this.processManualQueue();
       }
     });
 
-    // AI сообщения — только первый бот отправляет
+    // AI messages only go through bot 0
     if (this.botIndex === 0) {
       this.aiService.on('message', (message: string) => {
         if (message?.trim()) {
@@ -119,10 +114,8 @@ export class Bot {
     this.isSendingManual = true;
     while (this.manualQueue.length > 0) {
       const msg = this.manualQueue.shift()!;
-      try {
-        await this.sendMessage(msg);
-        this.messageCount++;
-      } catch (e) { logger.error('Manual send error:', e); }
+      try { await this.sendMessage(msg); this.messageCount++; }
+      catch (e) { logger.error(`Bot[${this.botIndex}] manual send error:`, e); }
       if (this.manualQueue.length > 0) await new Promise(r => setTimeout(r, this.MANUAL_DELAY));
     }
     this.isSendingManual = false;
@@ -131,14 +124,12 @@ export class Bot {
   private async processAIQueue(): Promise<void> {
     if (this.isSendingAI || this.aiQueue.length === 0) return;
     this.isSendingAI = true;
-    const aiDelay = parseInt(process.env.MESSAGE_INTERVAL || '5000');
+    const delay = parseInt(process.env.MESSAGE_INTERVAL || '5000');
     while (this.aiQueue.length > 0) {
       const msg = this.aiQueue.shift()!;
-      try {
-        await this.sendMessage(msg);
-        this.messageCount++;
-      } catch (e) { logger.error('AI send error:', e); }
-      if (this.aiQueue.length > 0) await new Promise(r => setTimeout(r, aiDelay));
+      try { await this.sendMessage(msg); this.messageCount++; }
+      catch (e) { logger.error(`Bot[${this.botIndex}] AI send error:`, e); }
+      if (this.aiQueue.length > 0) await new Promise(r => setTimeout(r, delay));
     }
     this.isSendingAI = false;
   }
@@ -155,23 +146,25 @@ export class Bot {
   private async sendMessage(message: string): Promise<void> {
     if (!this.client || !message) return;
     const channelUrl = process.env.TWITCH_CHANNEL!;
-    const channelName = channelUrl.includes('twitch.tv/')
+    const ch = channelUrl.includes('twitch.tv/')
       ? channelUrl.split('twitch.tv/')[1].split('/')[0].split('?')[0]
       : channelUrl;
-    await this.client.say(`#${channelName}`, message);
+    await this.client.say(`#${ch}`, message);
   }
 
   public connect(): void {
     if (!this.client) return;
-    this.client.connect().catch((e: Error) => logger.error(`Connect error:`, e));
+    this.client.connect().catch(e => logger.error(`Bot[${this.botIndex}] connect error:`, e));
   }
 
   public disconnect(): void {
     this.manualQueue = [];
     this.aiQueue = [];
-    try { this.client?.disconnect(); } catch (e) { }
+    try { this.client?.disconnect(); } catch (_) {}
+    try { if (this.botIndex === 0) this.aiService.stopVoiceCapture(); } catch (_) {}
   }
 
   public isBotConnected(): boolean { return this.isConnected; }
   public getUsername(): string { return this.client?.getUsername() || ''; }
+  public getBotIndex(): number { return this.botIndex; }
 }

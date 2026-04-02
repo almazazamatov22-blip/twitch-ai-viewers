@@ -162,7 +162,6 @@ export class AIService extends EventEmitter {
     if (!channelName) throw new Error('Invalid channel name');
     logger.info('Starting voice capture for channel:', channelName);
 
-    // Get channel info but do NOT block on isLive check
     try {
       this.currentChannelInfo = await this.getChannelInfo(channelName);
     } catch (e) {
@@ -173,7 +172,7 @@ export class AIService extends EventEmitter {
     this.captureLoop(channelName).catch(error => {
       logger.error('Error in capture loop:', error);
       this.isCapturing = false;
-      logger.info('Will retry voice capture in 60 seconds...');
+      logger.info('Retrying voice capture in 60s...');
       setTimeout(() => this.startVoiceCapture(channelName), 60000);
     });
   }
@@ -544,54 +543,54 @@ export class AIService extends EventEmitter {
   private async getStreamUrl(channelName: string): Promise<string> {
     const { execSync } = require('child_process');
 
-    // Method 1: streamlink (installed via pip in build)
+    // Use bot OAuth token for streamlink authentication
+    const oauthToken = (process.env.BOT1_OAUTH_TOKEN || process.env.BOT1_OAUTH || '')
+      .replace('oauth:', '');
+
+    // Method 1: streamlink with OAuth token
+    if (oauthToken) {
+      try {
+        const cmd = `streamlink --stream-url --twitch-api-header "Authorization=OAuth ${oauthToken}" https://www.twitch.tv/${channelName} best 2>/dev/null`;
+        const url = execSync(cmd, { timeout: 30000 }).toString().trim();
+        if (url && url.startsWith('http')) {
+          logger.info('Got stream URL via streamlink with OAuth');
+          return url;
+        }
+      } catch (_e) {
+        logger.warn('streamlink with OAuth failed, trying without auth');
+      }
+    }
+
+    // Method 2: streamlink without auth
     try {
       const url = execSync(
         `streamlink --stream-url https://www.twitch.tv/${channelName} best 2>/dev/null`,
         { timeout: 30000 }
       ).toString().trim();
       if (url && url.startsWith('http')) {
-        logger.info('Got stream URL via streamlink');
+        logger.info('Got stream URL via streamlink (no auth)');
         return url;
       }
     } catch (_e) {
-      logger.warn('streamlink failed, trying API fallback');
+      logger.warn('streamlink failed entirely, trying HLS fallback');
     }
 
-    // Method 2: Twitch API token + usher URL
-    try {
-      if (!this.accessToken) {
-        this.accessToken = await this.generateAccessToken();
-      }
+    // Method 3: Twitch API + usher
+    if (!this.accessToken) this.accessToken = await this.generateAccessToken();
 
-      const userResp = await axios.get(`https://api.twitch.tv/helix/users?login=${channelName}`, {
-        headers: {
-          'Client-ID': process.env.TWITCH_CLIENT_ID,
-          'Authorization': `Bearer ${this.accessToken}`
-        }
-      });
+    const userResp = await axios.get(`https://api.twitch.tv/helix/users?login=${channelName}`, {
+      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${this.accessToken}` }
+    });
+    const userId = userResp.data.data[0]?.id;
+    if (!userId) throw new Error(`User ${channelName} not found`);
 
-      const userId = userResp.data.data[0]?.id;
-      if (!userId) throw new Error('User not found');
+    const streamResp = await axios.get(`https://api.twitch.tv/helix/streams?user_id=${userId}`, {
+      headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${this.accessToken}` }
+    });
+    if (!streamResp.data.data[0]) throw new Error(`Channel ${channelName} is not live`);
 
-      const streamResp = await axios.get(`https://api.twitch.tv/helix/streams?user_id=${userId}`, {
-        headers: {
-          'Client-ID': process.env.TWITCH_CLIENT_ID,
-          'Authorization': `Bearer ${this.accessToken}`
-        }
-      });
-
-      if (!streamResp.data.data[0]) {
-        throw new Error(`Channel ${channelName} is not live according to API`);
-      }
-
-      // Use the token we already have for HLS auth
-      const hlsUrl = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?allow_source=true&sig=&token=&allow_spectre=true`;
-      logger.info('Using HLS URL with API token');
-      return hlsUrl;
-    } catch (err) {
-      logger.error('API fallback failed:', err);
-      throw err;
-    }
+    const hlsUrl = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?allow_source=true`;
+    logger.info('Using HLS fallback URL');
+    return hlsUrl;
   }
 } 

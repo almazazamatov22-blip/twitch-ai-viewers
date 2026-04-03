@@ -49,7 +49,7 @@ export class Bot {
 
     if (this.shouldHandleVoiceCapture) {
       this.setupVoiceCapture(config.channel).catch(err =>
-        logger.error(`Voice capture setup error for ${config.username}:`, err)
+        logger.error(`Voice capture setup error:`, err)
       );
     }
   }
@@ -57,28 +57,25 @@ export class Bot {
   private setupEventHandlers(): void {
     if (!this.client) return;
 
-    this.client.on('message', (_ch, tags, message, self) => {
-      if (self) return;
-
-      const username = tags['display-name'] || tags.username || 'viewer';
-      const channelLower = this.channelName.toLowerCase().replace('https://www.twitch.tv/', '').replace(/\/$/, '');
-      const isStreamer = tags.username?.toLowerCase() === channelLower;
-
-      // All bots forward chat — server deduplicates by message ID
-      this.aiService.emit('incomingChat', {
-        id: tags.id || `${username}-${message}-${Date.now()}`,
-        username,
-        message,
-        isStreamer,
-        color: tags.color || null
+    // ONLY bot[0] forwards incoming chat → no duplicates
+    if (this.botIndex === 0) {
+      this.client.on('message', (_ch, tags, message, self) => {
+        if (self) return;
+        const username = tags['display-name'] || tags.username || 'viewer';
+        const chLower = this.channelName.toLowerCase().replace(/^https?:\/\/www\.twitch\.tv\//, '');
+        const isStreamer = (tags.username || '').toLowerCase() === chLower;
+        this.aiService.emit('incomingChat', {
+          id: tags.id,
+          username,
+          message,
+          isStreamer,
+          color: tags.color || null
+        });
+        if (Math.random() < 0.2) {
+          this.aiService.emit('chatMessage', JSON.stringify({ chatMessage: message, username }));
+        }
       });
-
-      if (this.botIndex === 0 && Math.random() < 0.2) {
-        this.aiService.emit('chatMessage', JSON.stringify({
-          chatMessage: message, username, messageCount: this.messageCount
-        }));
-      }
-    });
+    }
 
     this.client.on('connected', (address, port) => {
       this.isConnected = true;
@@ -94,16 +91,15 @@ export class Bot {
       logger.info(`Bot[${this.botIndex}] ${this.client?.getUsername()} logged in`)
     );
 
-    // Each bot listens to its own manual event
+    // Each bot has its own manual event channel
     this.aiService.on(`manualMessage_${this.botIndex}`, (message: string) => {
       if (message?.trim()) {
-        logger.info(`Bot[${this.botIndex}] queuing: "${message}"`);
         this.manualQueue.push(message);
         this.processManualQueue();
       }
     });
 
-    // AI messages only via bot 0
+    // AI messages only via bot[0]
     if (this.botIndex === 0) {
       this.aiService.on('message', (message: string) => {
         if (message?.trim()) {
@@ -120,7 +116,7 @@ export class Bot {
     while (this.manualQueue.length > 0) {
       const msg = this.manualQueue.shift()!;
       try { await this.sendMessage(msg); this.messageCount++; }
-      catch (e) { logger.error(`Bot[${this.botIndex}] manual send error:`, e); }
+      catch (e) { logger.error(`Bot[${this.botIndex}] send error:`, e); }
       if (this.manualQueue.length > 0) await new Promise(r => setTimeout(r, this.MANUAL_DELAY));
     }
     this.isSendingManual = false;
@@ -140,23 +136,20 @@ export class Bot {
   }
 
   private async setupVoiceCapture(channel: string): Promise<void> {
-    logger.info(`Setting up voice capture for channel: ${channel}`);
     try { await this.aiService.startVoiceCapture(channel); }
     catch (error) { logger.error('Error setting up voice capture:', error); }
   }
 
   private async sendMessage(message: string): Promise<void> {
     if (!this.client || !message) return;
-    const channelUrl = process.env.TWITCH_CHANNEL!;
-    const ch = channelUrl.includes('twitch.tv/')
-      ? channelUrl.split('twitch.tv/')[1].split('/')[0].split('?')[0]
-      : channelUrl;
+    const ch = process.env.TWITCH_CHANNEL!.includes('twitch.tv/')
+      ? process.env.TWITCH_CHANNEL!.split('twitch.tv/')[1].split('/')[0].split('?')[0]
+      : process.env.TWITCH_CHANNEL!;
     await this.client.say(`#${ch}`, message);
   }
 
   public connect(): void {
-    if (!this.client) return;
-    this.client.connect().catch(e => logger.error(`Bot[${this.botIndex}] connect error:`, e));
+    this.client?.connect().catch(e => logger.error(`Bot[${this.botIndex}] connect error:`, e));
   }
 
   public disconnect(): void {

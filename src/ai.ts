@@ -155,15 +155,11 @@ export class AIService extends EventEmitter {
   public async startVoiceCapture(channel: string): Promise<void> {
     if (this.isCapturing) return;
     const channelName = channel.startsWith('https://www.twitch.tv/')
-      ? channel.split('/').pop()!
-      : channel;
+      ? channel.split('/').pop()! : channel;
     if (!channelName) throw new Error('Invalid channel name');
     logger.info('Starting voice capture for channel:', channelName);
-    try {
-      this.currentChannelInfo = await this.getChannelInfo(channelName);
-    } catch (e) {
-      logger.warn('Could not fetch channel info, proceeding anyway');
-    }
+    try { this.currentChannelInfo = await this.getChannelInfo(channelName); }
+    catch (e) { logger.warn('Could not fetch channel info, proceeding anyway'); }
     this.isCapturing = true;
     this.captureLoop(channelName).catch(error => {
       logger.error('Error in capture loop:', error);
@@ -537,41 +533,37 @@ export class AIService extends EventEmitter {
   }
 
   private async getStreamUrl(channelName: string): Promise<string> {
-    // Use Twitch GQL to get proper HLS token - works without streamlink
-    const oauthToken = (process.env.BOT1_OAUTH_TOKEN || process.env.BOT1_OAUTH || '')
-      .replace('oauth:', '');
-
-    const gqlHeaders: Record<string, string> = {
-      'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-      'Content-Type': 'application/json',
-    };
-    if (oauthToken) {
-      gqlHeaders['Authorization'] = `OAuth ${oauthToken}`;
-    }
-
+    // Anonymous GQL - works for all public streams, no auth needed
     try {
-      const tokenResp = await axios.post('https://gql.twitch.tv/gql', {
+      const resp = await axios.post('https://gql.twitch.tv/gql', {
         operationName: 'PlaybackAccessToken_Template',
         query: `query PlaybackAccessToken_Template($login:String!,$isLive:Boolean!,$vodID:ID!,$isVod:Boolean!,$playerType:String!){streamPlaybackAccessToken(channelName:$login,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isLive){value signature __typename}videoPlaybackAccessToken(id:$vodID,params:{platform:"web",playerBackend:"mediaplayer",playerType:$playerType})@include(if:$isVod){value signature __typename}}`,
-        variables: {
-          isLive: true,
-          login: channelName,
-          isVod: false,
-          vodID: '',
-          playerType: 'site'
-        }
-      }, { headers: gqlHeaders });
+        variables: { isLive: true, login: channelName, isVod: false, vodID: '', playerType: 'site' }
+      }, {
+        headers: {
+          'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        },
+        timeout: 15000
+      });
 
-      const tokenData = tokenResp.data?.data?.streamPlaybackAccessToken;
-      if (!tokenData?.value || !tokenData?.signature) {
-        throw new Error('No token in GQL response');
+      const td = resp.data?.data?.streamPlaybackAccessToken;
+      if (!td?.value || !td?.signature) {
+        const errMsg = JSON.stringify(resp.data?.errors || resp.data);
+        throw new Error(`No token in GQL response: ${errMsg}`);
       }
 
-      const url = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8?client_id=kimne78kx3ncx6brgo4mv6wki5h1ko&token=${encodeURIComponent(tokenData.value)}&sig=${tokenData.signature}&allow_source=true&allow_spectre=true&fast_bread=true`;
-      logger.info('Got HLS URL via GQL token');
+      const url = `https://usher.ttvnw.net/api/channel/hls/${channelName}.m3u8`
+        + `?client_id=kimne78kx3ncx6brgo4mv6wki5h1ko`
+        + `&token=${encodeURIComponent(td.value)}`
+        + `&sig=${td.signature}`
+        + `&allow_source=true&allow_spectre=true&fast_bread=true`;
+
+      logger.info('Got HLS URL via anonymous GQL');
       return url;
     } catch (err: any) {
-      logger.error('GQL token failed:', err?.response?.data || err?.message);
+      logger.error('GQL stream URL failed:', err?.response?.data || err?.message);
       throw err;
     }
   }

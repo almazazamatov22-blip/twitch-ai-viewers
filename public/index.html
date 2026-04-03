@@ -25,6 +25,17 @@ body { background:var(--bg); color:var(--text); font-family:system-ui,sans-serif
 .vw { color:var(--muted); font-size:13px; }
 .storage-badge { font-size:11px; padding:3px 8px; border-radius:4px; background:var(--bg3); color:var(--muted); }
 .storage-badge.ok { background:#0a2e1a; color:var(--green); }
+.top-btn { font-size:12px; padding:5px 12px; background:transparent; border:1px solid var(--border); border-radius:20px; color:var(--muted); cursor:pointer; transition:all .15s; }
+.top-btn:hover { border-color:var(--purple); color:var(--purple); }
+.top-btn.follow:hover { border-color:#e91e8c; color:#e91e8c; }
+.top-btn.active { background:var(--purple); border-color:var(--purple); color:white; }
+.top-btn.follow.active { background:#e91e8c; border-color:#e91e8c; color:white; }
+.watch-btn { font-size:11px; padding:2px 7px; background:transparent; border:1px solid var(--border); border-radius:10px; color:var(--muted); cursor:pointer; }
+.watch-btn:hover { border-color:var(--green); color:var(--green); }
+.watch-btn.active { background:#0a2e1a; border-color:var(--green); color:var(--green); }
+.follow-bot-btn { font-size:11px; padding:2px 7px; background:transparent; border:1px solid var(--border); border-radius:10px; color:var(--muted); cursor:pointer; margin-right:4px; }
+.follow-bot-btn:hover { border-color:#e91e8c; color:#e91e8c; }
+.follow-bot-btn.done { border-color:#e91e8c; color:#e91e8c; }
 
 .left { background:var(--bg2); border-right:1px solid var(--border); overflow-y:auto; display:flex; flex-direction:column; }
 .sec-title { font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.8px; padding:12px 14px 6px; }
@@ -130,6 +141,8 @@ select.bsel { background:var(--bg3); border:1px solid var(--border); border-radi
   <div class="topbar-r">
     <span class="vw" id="vw"></span>
     <span class="storage-badge" id="storage-badge">хранилище</span>
+    <button class="top-btn" id="watch-all-btn">👁 Смотреть всем</button>
+    <button class="top-btn follow" id="follow-all-btn">♥ Фолло всем</button>
   </div>
 </div>
 
@@ -236,6 +249,8 @@ function renderBots(bots) {
         <div class="bname">${esc(b.username)}</div>
         <div class="bst ${b.connected&&b.enabled?'on':''}">${b.connected&&b.enabled?'онлайн':'выключен'}</div>
       </div>
+      <button class="follow-bot-btn" data-follow="${i}" title="Подписаться">♥</button>
+      <button class="watch-btn ${b.watching?'active':''}" data-watch="${i}" title="${b.watching?'Смотрит':'Не смотрит'}">${b.watching?'👁':'○'}</button>
       <label class="tog">
         <input type="checkbox" ${b.enabled?'checked':''} data-bot="${i}" class="bot-toggle">
         <span class="sl"></span>
@@ -368,6 +383,55 @@ document.getElementById('mok').addEventListener('click',modalOk);
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape') document.getElementById('modal').classList.add('hidden');
   if(e.key==='Enter'&&!document.getElementById('modal').classList.contains('hidden')) modalOk();
+});
+
+// Follow single bot
+document.getElementById('bot-list').addEventListener('click', async e => {
+  const fb = e.target.closest('[data-follow]');
+  if (fb) {
+    const idx = parseInt(fb.dataset.follow);
+    fb.textContent='...'; fb.disabled=true;
+    const r = await post('/api/follow',{botIndex:idx});
+    if (r.ok) { fb.textContent='♥'; fb.classList.add('done'); toast(`${r.botName} подписан!`); }
+    else { fb.textContent='♥'; fb.disabled=false; toast('Ошибка: '+r.error, 4000); }
+    return;
+  }
+  const wb = e.target.closest('[data-watch]');
+  if (wb) {
+    const idx = parseInt(wb.dataset.watch);
+    wb.textContent='...'; wb.disabled=true;
+    const r = await post('/api/watch',{botIndex:idx});
+    if (r.ok) {
+      wb.textContent = r.watching ? '👁' : '○';
+      wb.classList.toggle('active', r.watching);
+      toast(r.watching ? `${r.botName} смотрит стрим` : `${r.botName} перестал смотреть`);
+    } else { toast('Ошибка: '+r.error, 4000); }
+    wb.disabled=false;
+    setTimeout(loadStatus,1000);
+    return;
+  }
+});
+
+// Follow all
+document.getElementById('follow-all-btn').addEventListener('click', async () => {
+  const btn=document.getElementById('follow-all-btn');
+  btn.textContent='...'; btn.disabled=true;
+  const r = await post('/api/follow-all',{});
+  const ok = (r.results||[]).filter(x=>x.ok).length;
+  const fail = (r.results||[]).filter(x=>!x.ok).length;
+  btn.textContent='♥ Фолло всем'; btn.disabled=false;
+  toast(`Подписано: ${ok}, ошибок: ${fail}`);
+});
+
+// Watch all
+document.getElementById('watch-all-btn').addEventListener('click', async () => {
+  const btn=document.getElementById('watch-all-btn');
+  btn.textContent='...'; btn.disabled=true;
+  const r = await post('/api/watch-all',{});
+  const ok = (r.results||[]).filter(x=>x.ok).length;
+  btn.textContent='👁 Смотреть всем'; btn.disabled=false;
+  toast(`Начали смотреть: ${ok}`);
+  setTimeout(loadStatus,1000);
 });
 
 socket.on('bot-sent',d=>{

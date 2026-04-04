@@ -31,7 +31,7 @@ body{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;fon
 .bav.off{background:var(--bg3);color:var(--muted)}
 .binfo{flex:1;min-width:0}
 .bname{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.bst{font-size:10px;color:var(--muted)}.bst.on{color:var(--green)}
+.bst{font-size:10px;color:var(--muted)}.bst.on{color:var(--green)}.bst.expired{color:#ffb300}
 .bacts{display:flex;align-items:center;gap:3px}
 .bbtn{font-size:10px;padding:2px 6px;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .bbtn:hover{border-color:var(--purple);color:var(--purple)}
@@ -243,22 +243,27 @@ function updateHeader(info, channel) {
 }
 
 function renderBots(bots) {
-  document.getElementById('bot-list').innerHTML = bots.map((b,i) => `
+  document.getElementById('bot-list').innerHTML = bots.map((b,i) => {
+    const offline = !b.connected && b.enabled;
+    const statusText = b.connected ? 'онлайн' : (b.enabled ? '⚠️ токен устарел' : 'выключен');
+    const statusClass = b.connected ? 'on' : (b.enabled ? 'expired' : '');
+    return `
     <div class="bot-row">
-      <div class="bav ${b.enabled?'':'off'}">${esc(b.username.slice(0,2).toUpperCase())}</div>
+      <div class="bav ${b.enabled&&b.connected?'':'off'}">${esc(b.username.slice(0,2).toUpperCase())}</div>
       <div class="binfo">
         <div class="bname">${esc(b.username)}</div>
-        <div class="bst ${b.connected&&b.enabled?'on':''}">${b.connected&&b.enabled?'онлайн':'выключен'}</div>
+        <div class="bst ${statusClass}" title="${offline?'Обнови OAuth токен на twitchapps.com/tmi':''}">${statusText}</div>
       </div>
       <div class="bacts">
-        <button class="bbtn follow ${b.hasUserToken?'':'need-token'}" data-follow="${i}" title="${b.hasUserToken?'Подписаться':'Нужен USER TOKEN'}">${b.hasUserToken?'♥':'🔑'}</button>
-        <button class="bbtn watch ${b.watching?'on':''}" data-watch="${i}">${b.watching?'👁':'○'}</button>
+        <button class="bbtn follow ${b.hasUserToken?'':'need-token'}" data-follow="${i}" title="${b.hasUserToken?'Подписаться':'Авторизовать для Follow'}">${b.hasUserToken?'♥':'🔑'}</button>
+        <button class="bbtn watch ${b.watching?'on':''}" data-watch="${i}" title="${b.watching?'Смотрит поток':'Начать смотреть'}">${b.watching?'👁':'○'}</button>
         <label class="tog">
           <input type="checkbox" ${b.enabled?'checked':''} data-bot="${i}" class="bot-toggle">
           <span class="sl"></span>
         </label>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 document.getElementById('bot-list').addEventListener('change', async e => {

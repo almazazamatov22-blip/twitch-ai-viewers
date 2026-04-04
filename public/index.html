@@ -263,8 +263,24 @@ document.getElementById('bot-list').addEventListener('click', async e => {
     const orig=fb.textContent; fb.textContent='...'; fb.disabled=true;
     const r = await post('/api/follow',{botIndex:idx});
     fb.disabled=false;
-    if (r.ok) { fb.textContent='✓'; fb.classList.add('done'); toast(r.botName+' подписан! ♥'); }
-    else { fb.textContent=orig; toast('Ошибка: '+r.error, 5000); }
+    if (r.ok) {
+      fb.textContent='✓'; fb.classList.add('done'); toast(r.botName+' подписан! ♥');
+    } else if (r.authUrl) {
+      fb.textContent='🔑';
+      const popup = window.open(r.authUrl, 'twitch-auth', 'width=520,height=620,scrollbars=yes');
+      toast('Войди под аккаунтом бота → потом снова нажми ♥', 6000);
+      const poll = setInterval(async () => {
+        const st = await fetch('/api/status').then(x=>x.json());
+        if (st.bots?.[idx]?.hasUserToken) {
+          clearInterval(poll); try{popup?.close();}catch(_){}
+          fb.textContent='♥'; toast('Авторизован! Теперь нажми ♥');
+          loadStatus();
+        }
+      }, 2000);
+      setTimeout(()=>clearInterval(poll), 120000);
+    } else {
+      fb.textContent=orig; toast('Ошибка: '+(r.error||'неизвестно'), 5000);
+    }
     setTimeout(loadStatus,1000);
     return;
   }

@@ -137,13 +137,7 @@ select.bsel{background:var(--bg3);border:1px solid var(--border);border-radius:v
 <div class="left">
   <div class="sec">Боты</div>
   <div id="bot-list"></div>
-  <div id="token-guide" class="token-guide hidden">
-    ⚠️ <b>Для Follow нужен USER TOKEN:</b><br>
-    1. Открой <a href="https://dev.twitch.tv/console/apps" target="_blank">dev.twitch.tv/console</a> → Edit твоего приложения<br>
-    2. В "OAuth Redirect URLs" добавь: <code id="railway-url-display">твой-url.railway.app</code><br>
-    3. Нажми 🔑 у нужного бота — авторизуйся под его аккаунтом<br>
-    <small style="opacity:.7">Или добавь вручную: Railway Variables → BOT1_USER_TOKEN</small>
-  </div>
+
   <div class="sec" style="margin-top:6px">Быстрые фразы</div>
   <div id="phrase-list"></div>
   <div style="padding:6px 12px 12px">
@@ -212,17 +206,6 @@ async function loadStatus() {
     renderPhrases(phraseData);
     updateHeader(d.channelInfo, d.channel);
 
-    // Check if any bot needs user token
-    const needsToken = botList.some(b => !b.hasUserToken);
-    document.getElementById('token-guide').classList.toggle('hidden', !needsToken);
-
-    // Set Railway URL in token guide
-    try {
-      const railwayUrl = window.location.origin;
-      const el = document.getElementById('railway-url-display');
-      if (el) el.textContent = railwayUrl + '/auth/callback';
-    } catch(_) {}
-
     const sel = document.getElementById('bsel');
     const prev = sel.value;
     sel.innerHTML = botList.map((b,i) => `<option value="${i}">${esc(b.username)}</option>`).join('');
@@ -255,7 +238,7 @@ function renderBots(bots) {
         <div class="bst ${statusClass}" title="${offline?'Обнови OAuth токен на twitchapps.com/tmi':''}">${statusText}</div>
       </div>
       <div class="bacts">
-        <button class="bbtn follow ${b.hasUserToken?'':'need-token'}" data-follow="${i}" title="${b.hasUserToken?'Подписаться':'Авторизовать для Follow'}">${b.hasUserToken?'♥':'🔑'}</button>
+        <button class="bbtn follow" data-follow="${i}" title="Подписаться">♥</button>
         <button class="bbtn watch ${b.watching?'on':''}" data-watch="${i}" title="${b.watching?'Смотрит поток':'Начать смотреть'}">${b.watching?'👁':'○'}</button>
         <label class="tog">
           <input type="checkbox" ${b.enabled?'checked':''} data-bot="${i}" class="bot-toggle">
@@ -277,28 +260,12 @@ document.getElementById('bot-list').addEventListener('click', async e => {
   const fb = e.target.closest('[data-follow]');
   if (fb) {
     const idx=parseInt(fb.dataset.follow);
-    if (fb.classList.contains('need-token')) {
-      // Open OAuth flow
-      const w = window.open('/auth?bot='+idx, 'twitch-auth', 'width=550,height=650,scrollbars=yes');
-      toast('Авторизуй бота в открывшемся окне, потом снова нажми ♥', 5000);
-      // Poll for token every 3s
-      const poll = setInterval(async () => {
-        const d = await fetch('/api/status').then(r=>r.json());
-        if (d.bots?.[idx]?.hasUserToken) {
-          clearInterval(poll);
-          if (w && !w.closed) w.close();
-          toast('Токен получен! Теперь нажми ♥ для подписки');
-          loadStatus();
-        }
-      }, 3000);
-      setTimeout(() => clearInterval(poll), 120000); // stop polling after 2min
-      return;
-    }
     const orig=fb.textContent; fb.textContent='...'; fb.disabled=true;
     const r = await post('/api/follow',{botIndex:idx});
     fb.disabled=false;
-    if (r.ok) { fb.textContent='✓'; fb.classList.add('done'); toast(`${r.botName} подписан!`); }
-    else { fb.textContent=orig; toast('Ошибка: '+r.error, 4000); }
+    if (r.ok) { fb.textContent='✓'; fb.classList.add('done'); toast(r.botName+' подписан! ♥'); }
+    else { fb.textContent=orig; toast('Ошибка: '+r.error, 5000); }
+    setTimeout(loadStatus,1000);
     return;
   }
   const wb = e.target.closest('[data-watch]');
@@ -310,7 +277,7 @@ document.getElementById('bot-list').addEventListener('click', async e => {
     if (r.ok) {
       wb.textContent=r.watching?'👁':'○';
       wb.classList.toggle('on',r.watching);
-      toast(r.watching?`${r.botName} смотрит стрим`:`${r.botName} перестал смотреть`);
+      toast(r.watching?r.botName+' смотрит стрим':r.botName+' перестал смотреть');
     } else { wb.textContent=orig; toast('Ошибка: '+r.error, 4000); }
     setTimeout(loadStatus,1000);
   }
@@ -443,6 +410,12 @@ document.addEventListener('keydown',e=>{
 // Sockets
 socket.on('bot-sent', d => {
   const name = d.botName || botList[d.botIndex]?.username || 'Бот';
+  addMsg('bot', name, d.message, false);
+});
+socket.on('ai-message-pending', d => {
+  // Show AI message as coming from next bot in round-robin
+  const connectedBots = botList.filter(b => b.connected && b.enabled);
+  const name = connectedBots.length > 0 ? connectedBots[0].username : 'Бот';
   addMsg('bot', name, d.message, false);
 });
 socket.on('incoming-chat', d => addMsg(d.isStreamer?'streamer':'user', d.username, d.message, true));

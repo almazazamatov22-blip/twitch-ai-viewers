@@ -159,35 +159,29 @@ export class AIService extends EventEmitter {
     if (!channelName) throw new Error('Invalid channel name');
     logger.info('Starting voice capture for channel:', channelName);
     try { this.currentChannelInfo = await this.getChannelInfo(channelName); }
-    catch (e) { logger.warn('Could not fetch channel info'); }
+    catch (e) { logger.warn('Could not fetch channel info, will proceed'); }
     this.isCapturing = true;
     this.captureLoop(channelName).catch(error => {
-      logger.error('Error in capture loop:', error);
+      logger.error('Capture loop ended:', error?.message || error);
       this.isCapturing = false;
-      logger.info('Retrying voice capture in 60s...');
-      setTimeout(() => this.startVoiceCapture(channelName), 60000);
+      logger.info('Will retry voice capture in 30s...');
+      setTimeout(() => this.startVoiceCapture(channelName), 30000);
     });
   }
 
-  private async captureLoop(channel: string): Promise<void> {
-    let isProcessing = false;
+  private async captureLoop(channelName: string): Promise<void> {
+    let consecutiveErrors = 0;
 
     while (this.isCapturing) {
       try {
-        if (isProcessing) {
-          logger.info('Previous chunk still processing, waiting...');
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          continue;
-        }
-
-        const streamUrl = await this.getStreamUrl(channel);
+        const streamUrl = await this.getStreamUrl(channelName);
         this.tempAudioFile = join(tmpdir(), `twitch-audio-${Date.now()}.wav`);
 
-        isProcessing = true;
         await new Promise<void>((resolve, reject) => {
           this.currentProcess = ffmpeg(streamUrl)
             .inputOptions([
-              '-user_agent', 'Mozilla/5.0',
+              '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+              '-headers', 'Origin: https://www.twitch.tv\r\nReferer: https://www.twitch.tv/',
               '-loglevel', 'error',
               '-f', 'hls',
             ])
@@ -200,32 +194,30 @@ export class AIService extends EventEmitter {
             ])
             .duration(parseInt(process.env.TRANSCRIPT_DURATION || '60000') / 1000)
             .on('error', (err: Error) => {
-              isProcessing = false;
-              this.stopVoiceCapture();
-              reject(err);
+              logger.warn('FFmpeg error (will retry):', err.message);
+              resolve(); // don't reject - just move to next iteration
             })
             .on('end', async () => {
-              if (this.isCapturing) {
-                try {
-                  await this.processAudioChunk();
-                } finally {
-                  isProcessing = false;
-                }
-                resolve();
-              } else {
-                isProcessing = false;
-                resolve();
+              if (this.isCapturing && this.tempAudioFile) {
+                try { await this.processAudioChunk(); } catch (_) {}
               }
+              resolve();
             })
             .save(this.tempAudioFile!);
         });
 
-        // Add a small delay between captures to avoid processing the same audio twice
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      } catch (error) {
-        isProcessing = false;
-        logger.error('Error in capture loop:', error);
-        this.stopVoiceCapture();
+        consecutiveErrors = 0; // reset on success
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (error: any) {
+        consecutiveErrors++;
+        logger.error(`Capture error #${consecutiveErrors}:`, error?.message || error);
+        if (consecutiveErrors >= 3) {
+          logger.warn('Too many errors, pausing 30s before retry...');
+          await new Promise(r => setTimeout(r, 30000));
+          consecutiveErrors = 0;
+        } else {
+          await new Promise(r => setTimeout(r, 5000));
+        }
       }
     }
   }
@@ -533,9 +525,7 @@ export class AIService extends EventEmitter {
   }
 
   private async getStreamUrl(channelName: string): Promise<string> {
-    // Wait until stream is live (check every 30s)
-    let attempts = 0;
-    while (attempts < 10) {
+    for (let attempt = 0; attempt < 5; attempt++) {
       try {
         const resp = await axios.post('https://gql.twitch.tv/gql', {
           operationName: 'PlaybackAccessToken_Template',
@@ -554,13 +544,9 @@ export class AIService extends EventEmitter {
 
         const td = resp.data?.data?.streamPlaybackAccessToken;
         if (!td?.value || !td?.signature) {
-          logger.warn(`GQL: no token for ${channelName} (attempt ${attempts+1}), stream may be offline. Waiting 30s...`);
-          this.isCapturing = false;
+          logger.warn(`Stream offline or GQL failed (attempt ${attempt+1}). Waiting 30s...`);
           await new Promise(r => setTimeout(r, 30000));
-          // Refresh channel info
           try { this.currentChannelInfo = await this.getChannelInfo(channelName); } catch (_) {}
-          this.isCapturing = true;
-          attempts++;
           continue;
         }
 
@@ -570,14 +556,13 @@ export class AIService extends EventEmitter {
           + `&sig=${td.signature}`
           + `&allow_source=true&allow_spectre=true&fast_bread=true&p=${Math.floor(Math.random()*9999999)}`;
 
-        logger.info(`Got HLS URL for ${channelName}`);
+        logger.info(`Stream URL ready for ${channelName}`);
         return url;
       } catch (err: any) {
-        logger.error('GQL error:', err?.response?.data || err?.message);
-        await new Promise(r => setTimeout(r, 15000));
-        attempts++;
+        logger.error(`getStreamUrl attempt ${attempt+1} failed:`, err?.response?.data || err?.message);
+        await new Promise(r => setTimeout(r, 10000));
       }
     }
-    throw new Error(`Could not get stream URL for ${channelName} after 10 attempts`);
+    throw new Error(`Cannot get stream URL for ${channelName}`);
   }
 } 

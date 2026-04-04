@@ -52,24 +52,9 @@ async function getChannelId(channelName: string): Promise<string> {
 }
 
 async function followChannel(userToken: string, broadcasterId: string): Promise<void> {
-  const meResp = await axios.get('https://api.twitch.tv/helix/users', {
-    headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${userToken}` }
-  });
-  const userId = meResp.data.data[0]?.id;
-  if (!userId) throw new Error('Could not get user ID from token');
-
-  // Try Helix follow endpoint
-  try {
-    await axios.post(`https://api.twitch.tv/helix/channels/followed`,
-      { broadcaster_id: broadcasterId, user_id: userId },
-      { headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${userToken}`, 'Content-Type': 'application/json' } }
-    );
-    return;
-  } catch (e: any) {
-    logger.warn('Helix follow failed, trying GQL follow:', e?.response?.status);
-  }
-
-  // Fallback: GQL follow mutation
+  // Twitch removed Helix follow endpoint in 2023 - use GQL only
+  // Token must be in OAuth format (not Bearer)
+  const token = userToken.replace('oauth:', '').replace('OAuth ', '');
   const resp = await axios.post('https://gql.twitch.tv/gql', [{
     operationName: 'FollowButton_FollowUser',
     variables: { input: { targetID: broadcasterId, disableNotifications: false } },
@@ -77,12 +62,19 @@ async function followChannel(userToken: string, broadcasterId: string): Promise<
   }], {
     headers: {
       'Client-ID': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
-      'Authorization': `OAuth ${userToken}`,
+      'Authorization': `OAuth ${token}`,
       'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      'Origin': 'https://www.twitch.tv',
+      'Referer': 'https://www.twitch.tv/',
     }
   });
   const errors = resp.data?.[0]?.errors;
-  if (errors?.length) throw new Error(errors[0].message);
+  if (errors?.length) {
+    logger.error('GQL follow errors:', JSON.stringify(errors));
+    throw new Error(errors[0].message);
+  }
+  logger.info('GQL follow success, data:', JSON.stringify(resp.data?.[0]?.data));
 }
 
 export function startDashboardServer(aiService: AIService, bots: any[]) {
@@ -163,20 +155,22 @@ if(token){
     const { token, botIndex = 0 } = req.body;
     if (!token) return res.status(400).json({ error: 'No token' });
     try {
+      // Verify token via Helix (works with Bearer)
       const meResp = await axios.get('https://api.twitch.tv/helix/users', {
         headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${token}` }
       });
-      const username = meResp.data.data[0]?.login?.toLowerCase();
+      const userData = meResp.data.data[0];
+      const username = userData?.login?.toLowerCase();
       if (!username) throw new Error('Could not verify token');
-      // Store as BOT{n}_USER_TOKEN equivalent in memory
       const idx = parseInt(String(botIndex));
-      // Save to a runtime map (persists until restart)
-      runtimeTokens[idx] = token;
-      logger.info(`Saved runtime user token for bot[${idx}] = ${username}`);
+      runtimeTokens[idx] = token; // store clean token without prefix
+      logger.info(`Saved user token for bot[${idx}] = ${username}, id=${userData?.id}`);
       io.emit('bot-state', {});
       res.json({ ok: true, botName: username });
     } catch (e: any) {
-      res.status(500).json({ error: e?.response?.data?.message || e?.message || 'Failed' });
+      const errMsg = e?.response?.data?.message || e?.message || 'Failed to save token';
+      logger.error('auth/save error:', errMsg);
+      res.status(500).json({ error: errMsg });
     }
   });
 

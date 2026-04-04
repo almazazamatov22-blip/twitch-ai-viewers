@@ -2,6 +2,7 @@ import { Bot } from './bot';
 import { AIService } from './ai';
 import { logger } from './logger';
 import { startDashboardServer } from './server';
+import { getPersonality, BotMemory } from './personalities';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -72,24 +73,61 @@ async function main() {
       }
     }
 
+    // Each bot has its own personality and memory
+    const botMemories: BotMemory[] = bots.map(() => new BotMemory(15));
+
     // Round-robin: distribute AI messages across ALL connected bots
     let rrIndex = 0;
     aiService.on('message', (message: string) => {
       if (!message?.trim()) return;
-      // Find next connected bot
       let attempts = 0;
       while (attempts < bots.length) {
         const bot = bots[rrIndex % bots.length];
+        const idx = bot.getBotIndex();
         rrIndex++;
         attempts++;
         if (bot.isBotConnected()) {
+          // Add to bot's memory
+          botMemories[idx]?.add(message);
           bot.sendAIMessage(message);
-          logger.info(`AI message routed to bot[${bot.getBotIndex()}]: "${message}"`);
+          logger.info(`AI → bot[${idx}] ${bot.getUsername()}: "${message}"`);
           return;
         }
       }
-      // Fallback: send to first bot regardless
       if (bots.length > 0) bots[0].sendAIMessage(message);
+    });
+
+    // When chat comes in, pick a random connected bot to generate a contextual reply
+    aiService.on('chatMessage', async (contextJson: string) => {
+      const connectedBots = bots.filter(b => b.isBotConnected());
+      if (!connectedBots.length) return;
+      
+      // Pick random bot weighted by replyChance
+      const candidates = connectedBots.filter(b => {
+        const p = getPersonality(b.getBotIndex());
+        return Math.random() < p.replyChance;
+      });
+      
+      if (!candidates.length) return;
+      const bot = candidates[Math.floor(Math.random() * candidates.length)];
+      const idx = bot.getBotIndex();
+      const personality = getPersonality(idx);
+      const memory = botMemories[idx];
+      
+      try {
+        const contextWithMemory = JSON.stringify({
+          ...JSON.parse(contextJson),
+          botMemory: memory.getContext(),
+        });
+        const msg = await aiService.generateMessage(contextWithMemory, personality.systemPrompt);
+        if (msg?.trim()) {
+          memory.add(msg);
+          bot.sendAIMessage(msg);
+          logger.info(`Chat reply → bot[${idx}] ${bot.getUsername()}: "${msg}"`);
+        }
+      } catch (e) {
+        logger.error('Chat reply error:', e);
+      }
     });
 
     startDashboardServer(aiService, bots);

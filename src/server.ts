@@ -60,24 +60,48 @@ async function getChannelId(channelName: string): Promise<string> {
 // Follow using IRC token (twitchapps.com tokens are valid Twitch OAuth tokens)
 async function followWithToken(token: string, broadcasterId: string): Promise<void> {
   const cleanToken = token.replace(/^oauth:/i, '').trim();
-  const resp = await axios.post('https://gql.twitch.tv/gql', [{
-    operationName: 'FollowButton_FollowUser',
-    variables: { input: { targetID: broadcasterId, disableNotifications: false } },
-    extensions: {
-      persistedQuery: {
-        version: 1,
-        sha256Hash: '800e7346bdf7e5278a3c1d3f21b2b56e2639928f86815677a7126b715d7e4a23'
-      }
+  
+  // Try multiple client IDs - IRC tokens from twitchapps.com use their own client ID
+  const clientIDs = [
+    'q6batx0epp608isickayubi39itsckt', // twitchapps.com client ID
+    'kimne78kx3ncx6brgo4mv6wki5h1ko',  // Twitch web client ID
+    process.env.TWITCH_CLIENT_ID || '', // user's own app client ID
+  ].filter(Boolean);
+
+  let lastError = '';
+  for (const clientId of clientIDs) {
+    try {
+      const resp = await axios.post('https://gql.twitch.tv/gql', [{
+        operationName: 'FollowButton_FollowUser',
+        variables: { input: { targetID: broadcasterId, disableNotifications: false } },
+        extensions: {
+          persistedQuery: {
+            version: 1,
+            sha256Hash: '800e7346bdf7e5278a3c1d3f21b2b56e2639928f86815677a7126b715d7e4a23'
+          }
+        }
+      }], {
+        headers: {
+          'Client-ID': clientId,
+          'Authorization': `OAuth ${cleanToken}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Origin': 'https://www.twitch.tv',
+          'Referer': 'https://www.twitch.tv/',
+        }
+      });
+
+      const errors = resp.data?.[0]?.errors;
+      if (errors?.length) { lastError = errors[0].message; continue; }
+      
+      logger.info(`Follow success with client_id ${clientId}:`, JSON.stringify(resp.data?.[0]?.data));
+      return; // success
+    } catch (e: any) {
+      lastError = e?.response?.data?.message || e?.message || 'unknown';
+      logger.warn(`Follow failed with client_id ${clientId}:`, lastError);
     }
-  }], {
-    headers: { ...GQL, 'Authorization': `OAuth ${cleanToken}` }
-  });
-
-  const errors = resp.data?.[0]?.errors;
-  if (errors?.length) throw new Error(errors[0].message);
-
-  const followData = resp.data?.[0]?.data?.followUser;
-  logger.info('Follow result:', JSON.stringify(followData));
+  }
+  throw new Error(lastError || 'All follow attempts failed');
 }
 
 export function startDashboardServer(aiService: AIService, bots: any[]) {
@@ -262,13 +286,7 @@ export function startDashboardServer(aiService: AIService, bots: any[]) {
 
   // ── Events ──────────────────────────────────────
   aiService.on('incomingChat', (d: any) => io.emit('incoming-chat', d));
-  // AI messages are handled by main.ts round-robin, just forward to dashboard
-  aiService.on('message', (msg: string) => {
-    // We don't know which bot will send it yet (round-robin in main.ts)
-    // Dashboard will update when bot actually sends (bot-sent comes from emitSend)
-    // So just forward as "pending AI message" for display
-    io.emit('ai-message-pending', { message: msg, time: Date.now() });
-  });
+  // AI messages handled by round-robin in main.ts - dashboard gets bot-sent when actually sent
   aiService.on('transcription', (text: string) => io.emit('transcription', { text, time: Date.now() }));
 
   const PORT = parseInt(process.env.PORT || '3000');

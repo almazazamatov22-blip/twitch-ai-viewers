@@ -380,145 +380,46 @@ export class AIService extends EventEmitter {
     }
   }
 
-  public async generateMessage(context?: string): Promise<string> {
+  public async generateMessage(context?: string, botPersonality?: string): Promise<string> {
     try {
-      // If no channel info is available yet, don't generate a message
-      if (!this.currentChannelInfo) {
-        logger.warn('No channel info available for message generation');
-        return '';
-      }
+      if (!this.currentChannelInfo) return '';
 
       let parsedContext: any = {};
-      try {
-        if (context) {
-          parsedContext = JSON.parse(context);
-        }
-      } catch (error) {
-        logger.error('Error parsing context:', error);
-        parsedContext = { rawText: context };
-      }
+      try { if (context) parsedContext = JSON.parse(context); }
+      catch (_) { parsedContext = { rawText: context }; }
 
-      // Don't generate messages without transcription context
-      if (!parsedContext.lastTranscription && !parsedContext.chatMessage) {
-        logger.info('Transcription is being generated and will be available soon');
-        return '';
-      }
+      if (!parsedContext.lastTranscription && !parsedContext.chatMessage) return '';
+      if (parsedContext.lastTranscription && parsedContext.lastTranscription.length < 5) return '';
 
-      // Don't generate messages if the transcription is too short
-      if (parsedContext.lastTranscription && parsedContext.lastTranscription.length < 10) {
-        logger.warn('Transcription too short for message generation');
-        return '';
-      }
+      const lang = process.env.ORIGINAL_STREAM_LANGUAGE || 'ru';
+      const channelInfo = this.currentChannelInfo;
 
-      const channelContext = `
-        Channel Title: ${this.currentChannelInfo.title}
-        Game: ${this.currentChannelInfo.gameName}
-        Viewers: ${this.currentChannelInfo.viewerCount}
-        Description: ${this.currentChannelInfo.description}
-        Language: ${process.env.ORIGINAL_STREAM_LANGUAGE || 'en'}
-      `;
+      const systemPrompt = botPersonality || `Ты реальный зритель стрима на Twitch. Пиши как человек в чате — коротко, без знаков препинания, без заглавных букв в начале (кроме имён), без восклицательных знаков если это не уместно. Используй разговорный стиль. Можно материться и грубить если ситуация подходит.`;
 
-      const lastTranscription = parsedContext.lastTranscription ? `
-        The streamer just said: "${parsedContext.lastTranscription}"
-      ` : '';
+      const prompt = `Стрим: ${channelInfo.title} | Игра: ${channelInfo.gameName} | Язык: ${lang}
+${parsedContext.lastTranscription ? `Стример только что сказал: "${parsedContext.lastTranscription}"` : ''}
+${parsedContext.chatMessage ? `В чате написали: "${parsedContext.chatMessage}"` : ''}
 
-      const chatContext = parsedContext.chatMessage ? `
-        A viewer just said: "${parsedContext.chatMessage}"
-      ` : '';
+Напиши ОДНО короткое сообщение в чат (до 40 символов). Без кавычек, без объяснений — только само сообщение. Пиши на языке стрима (${lang}). Реагируй естественно на контекст. Не копируй фразы из контекста дословно.`;
 
-      const timeContext = parsedContext.timeSinceLastMessage ? `
-        Time since last message: ${Math.floor(parsedContext.timeSinceLastMessage / 1000)} seconds
-      ` : '';
-
-      const messageCountContext = parsedContext.messageCount ? `
-        Total messages sent: ${parsedContext.messageCount}
-      ` : '';
-
-      const prompt = `
-        You are a Twitch viewer watching this stream. Generate a natural, engaging message that a real viewer would type in chat.
-        
-        Stream Context:
-        ${channelContext}
-        
-        ${lastTranscription}
-        ${chatContext}
-        ${timeContext}
-        ${messageCountContext}
-        
-        Guidelines:
-        - Write as if you're a real viewer enjoying the stream
-        - Keep messages short and casual (max 50 characters)
-        - Use emojis in only 20% of messages, and when used, keep them natural and relevant
-        - Focus on the current game being played (${this.currentChannelInfo.gameName})
-        - If there's a transcription available, respond naturally to what the streamer said
-        - If there's a chat message, respond to it naturally
-        - Write in the stream's language (${process.env.ORIGINAL_STREAM_LANGUAGE || 'en'})
-        - Don't mention that you're a bot or AI
-        - Don't use excessive emojis or caps
-        - Don't spam or use repetitive messages
-        - Don't use commands or special characters
-        - Keep it natural and conversational
-        - Consider the time since the last message and message count to vary your responses
-        - IMPORTANT: Do NOT repeat what the streamer said. Instead, respond naturally to it.
-        - IMPORTANT: Generate JUST the chat message, not any other text or comments.
-        
-        Message Types (choose based on context):
-        1. Game-related comments:
-           - Comment on gameplay moments
-           - Ask about game mechanics
-           - Share tips or strategies
-           - React to in-game events
-        
-        2. Stream interaction:
-           - Respond to streamer's commentary
-           - Ask relevant questions about the game
-           - Share your thoughts on the streamer's playstyle
-           - React to streamer's reactions
-        
-        3. General engagement:
-           - Welcome new viewers
-           - React to streamer's jokes or stories
-           - Share your excitement about the stream
-           - Ask about streamer's plans or goals
-        
-        If there's not enough context to generate a specific message, ask general questions about:
-        - The current game being played
-        - The streamer's experience with the game
-        - Favorite strategies or playstyles
-        - Upcoming content or plans
-        - Community events or tournaments
-      `;
-
-      logger.info('Generating message with context:', {
-        channel: this.currentChannelInfo.title,
-        game: this.currentChannelInfo.gameName,
-        transcription: parsedContext.lastTranscription,
-        isStreamerMessage: parsedContext.isStreamerMessage
-      });
-
-      if (!this.groq) {
-        throw new Error('Groq client not initialized. Please set GROQ_API_KEY in environment variables.');
-      }
+      if (!this.groq) return '';
 
       const response = await this.groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
         messages: [
-          {
-            role: "system",
-            content: "You are a Twitch viewer watching a stream. Generate natural, engaging messages that a real viewer would type in chat. Never repeat what the streamer said - instead, respond naturally to it."
-          },
-          {
-            role: "user",
-            content: prompt
-          }
+          { role: "system", content: systemPrompt },
+          { role: "user", content: prompt }
         ],
-        max_tokens: 50,
-        temperature: 0.7
+        max_tokens: 30,
+        temperature: 0.9
       });
 
-      const message = response.choices[0].message?.content?.trim() || '';
+      const msg = (response.choices[0].message?.content?.trim() || '')
+        .replace(/^["']|["']$/g, '') // remove surrounding quotes
+        .replace(/\.$/, '')           // remove trailing period
+        .slice(0, 60);               // hard limit
 
-      return message;
+      return msg;
     } catch (error) {
       logger.error('Error generating message:', error);
       return '';

@@ -58,51 +58,34 @@ async function getChannelId(channelName: string): Promise<string> {
 }
 
 // Follow using IRC token (twitchapps.com tokens are valid Twitch OAuth tokens)
-async function followWithToken(token: string, broadcasterId: string): Promise<void> {
+async function followWithToken(token: string, clientId: string, broadcasterId: string): Promise<void> {
   const cleanToken = token.replace(/^oauth:/i, '').trim();
-  
-  // Try multiple client IDs - IRC tokens from twitchapps.com use their own client ID
-  const clientIDs = [
-    'q6batx0epp608isickayubi39itsckt', // twitchapps.com client ID
-    'kimne78kx3ncx6brgo4mv6wki5h1ko',  // Twitch web client ID
-    process.env.TWITCH_CLIENT_ID || '', // user's own app client ID
-  ].filter(Boolean);
-
-  let lastError = '';
-  for (const clientId of clientIDs) {
-    try {
-      const resp = await axios.post('https://gql.twitch.tv/gql', [{
-        operationName: 'FollowButton_FollowUser',
-        variables: { input: { targetID: broadcasterId, disableNotifications: false } },
-        extensions: {
-          persistedQuery: {
-            version: 1,
-            sha256Hash: '800e7346bdf7e5278a3c1d3f21b2b56e2639928f86815677a7126b715d7e4a23'
-          }
-        }
-      }], {
-        headers: {
-          'Client-ID': clientId,
-          'Authorization': `OAuth ${cleanToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Origin': 'https://www.twitch.tv',
-          'Referer': 'https://www.twitch.tv/',
-        }
-      });
-
-      const errors = resp.data?.[0]?.errors;
-      if (errors?.length) { lastError = errors[0].message; continue; }
-      
-      logger.info(`Follow success with client_id ${clientId}:`, JSON.stringify(resp.data?.[0]?.data));
-      return; // success
-    } catch (e: any) {
-      lastError = e?.response?.data?.message || e?.message || 'unknown';
-      logger.warn(`Follow failed with client_id ${clientId}:`, lastError);
+  const resp = await axios.post('https://gql.twitch.tv/gql', [{
+    operationName: 'FollowButton_FollowUser',
+    variables: { input: { targetID: broadcasterId, disableNotifications: false } },
+    extensions: {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: '800e7346bdf7e5278a3c1d3f21b2b56e2639928f86815677a7126b715d7e4a23'
+      }
     }
-  }
-  throw new Error(lastError || 'All follow attempts failed');
+  }], {
+    headers: {
+      'Client-ID': clientId,
+      'Authorization': `OAuth ${cleanToken}`,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+      'Origin': 'https://www.twitch.tv',
+      'Referer': 'https://www.twitch.tv/',
+    }
+  });
+  const errors = resp.data?.[0]?.errors;
+  if (errors?.length) throw new Error(errors[0].message);
+  logger.info('Follow OK:', JSON.stringify(resp.data?.[0]?.data));
 }
+
+// Runtime token storage (from /auth OAuth flow, persists until restart)
+const runtimeTokens: Record<number, string> = {};
 
 export function startDashboardServer(aiService: AIService, bots: any[]) {
   const app = express();
@@ -130,6 +113,7 @@ export function startDashboardServer(aiService: AIService, bots: any[]) {
         enabled: botStates[i] ?? true,
         watching: !!viewers[i]?.running,
         hasIRCToken: !!getIRCToken(i),
+        hasUserToken: !!runtimeTokens[i],
         index: i,
       })),
       channelInfo: aiService.currentChannelInfo,
@@ -137,21 +121,96 @@ export function startDashboardServer(aiService: AIService, bots: any[]) {
     });
   });
 
-  // ── Follow (uses IRC token - no auth page needed) ──
+  // ── OAuth flow for better follow token ───────────
+  app.get('/auth', (req, res) => {
+    const botIdx = parseInt(String(req.query.bot || '0'));
+    const host = req.headers.host || 'localhost';
+    const proto = host.includes('localhost') ? 'http' : 'https';
+    const redirectUri = `${proto}://${host}/auth/callback`;
+    const scope = 'user:edit:follows user:read:email channel:read:subscriptions';
+    const url = `https://id.twitch.tv/oauth2/authorize?client_id=${process.env.TWITCH_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=${botIdx}&force_verify=true`;
+    res.redirect(url);
+  });
+
+  app.get('/auth/callback', (_req, res) => {
+    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Auth</title>
+<style>body{background:#0e0e10;color:#efeff1;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;margin:0}.ok{color:#00c853;font-size:20px}.err{color:#e53935}</style></head><body>
+<div id="msg">Авторизация...</div>
+<script>
+const p=new URLSearchParams(window.location.hash.substring(1));
+const t=p.get('access_token'),s=p.get('state')||'0',m=document.getElementById('msg');
+if(t){
+  fetch('/auth/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,botIndex:parseInt(s)})})
+  .then(r=>r.json()).then(d=>{
+    m.innerHTML=d.ok?'<span class="ok">✓ Авторизован: '+d.botName+'</span><br><small style="opacity:.6">Закрой окно и нажми ♥</small>':'<span class="err">'+d.error+'</span>';
+  });
+}else{m.innerHTML='<span class="err">'+(p.get('error_description')||'Нет токена')+'</span>';}
+</script></body></html>`);
+  });
+
+  app.post('/auth/save', async (req, res) => {
+    const { token, botIndex = 0 } = req.body;
+    if (!token) return res.status(400).json({ error: 'No token' });
+    try {
+      const meResp = await axios.get('https://api.twitch.tv/helix/users', {
+        headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${token}` }
+      });
+      const username = meResp.data.data[0]?.login;
+      if (!username) throw new Error('Token invalid');
+      const idx = parseInt(String(botIndex));
+      runtimeTokens[idx] = token;
+      logger.info(`Auth token saved for bot[${idx}] = ${username}`);
+      io.emit('bot-state', {});
+      res.json({ ok: true, botName: username });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.response?.data?.message || e?.message || 'Failed' });
+    }
+  });
+
+  // ── Follow (tries user token first, then IRC token) ──
   app.post('/api/follow', async (req, res) => {
     const idx = parseInt(String(req.body.botIndex || 0));
     const botName = bots[idx]?.getUsername?.() || `Bot${idx + 1}`;
-    const token = getIRCToken(idx);
-    if (!token) return res.status(400).json({ error: `Нет токена для Bot${idx + 1}` });
+    let lastErr = 'No tokens available';
+
     try {
       const broadcasterId = await getChannelId(getChannelName());
-      await followWithToken(token, broadcasterId);
-      logger.info(`${botName} followed ${getChannelName()}`);
-      res.json({ ok: true, botName });
+      
+      // Try 1: user token from /auth flow (uses our app's client ID)
+      if (runtimeTokens[idx]) {
+        try {
+          await followWithToken(runtimeTokens[idx], process.env.TWITCH_CLIENT_ID!, broadcasterId);
+          logger.info(`${botName} followed via user token`);
+          return res.json({ ok: true, botName });
+        } catch (e: any) { lastErr = e?.message; logger.warn(`User token follow failed: ${lastErr}`); }
+      }
+
+      // Try 2: IRC token with twitchapps client ID (q6batx0epp608isickayubi39itsckt)
+      const ircToken = getIRCToken(idx);
+      if (ircToken) {
+        try {
+          await followWithToken(ircToken, 'q6batx0epp608isickayubi39itsckt', broadcasterId);
+          logger.info(`${botName} followed via IRC token + twitchapps clientId`);
+          return res.json({ ok: true, botName });
+        } catch (e: any) { lastErr = e?.message; logger.warn(`IRC+twitchapps failed: ${lastErr}`); }
+
+        // Try 3: IRC token with Twitch web client ID
+        try {
+          await followWithToken(ircToken, 'kimne78kx3ncx6brgo4mv6wki5h1ko', broadcasterId);
+          logger.info(`${botName} followed via IRC token + Twitch web clientId`);
+          return res.json({ ok: true, botName });
+        } catch (e: any) { lastErr = e?.message; logger.warn(`IRC+twitch-web failed: ${lastErr}`); }
+      }
+
+      // All failed - suggest /auth
+      const host = req.headers.host;
+      res.status(401).json({ 
+        error: lastErr, 
+        hint: `Авторизуй бота: нажми 🔑 у ${botName}`,
+        authUrl: `https://${host}/auth?bot=${idx}`
+      });
     } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || 'Failed';
-      logger.error(`Follow error for ${botName}:`, e?.response?.data || msg);
-      res.status(500).json({ error: msg });
+      res.status(500).json({ error: e?.message });
     }
   });
 
@@ -163,15 +222,25 @@ export function startDashboardServer(aiService: AIService, bots: any[]) {
 
     for (let i = 0; i < bots.length; i++) {
       const botName = bots[i]?.getUsername?.() || `Bot${i + 1}`;
-      const token = getIRCToken(i);
-      if (!token) { results.push({ botName, ok: false, error: 'Нет IRC токена' }); continue; }
-      try {
-        await followWithToken(token, broadcasterId);
-        results.push({ botName, ok: true });
-        await new Promise(r => setTimeout(r, 800));
-      } catch (e: any) {
-        results.push({ botName, ok: false, error: e?.message });
+      let ok = false;
+      let lastErr = 'no tokens';
+      
+      // Try user token first
+      if (runtimeTokens[i]) {
+        try { await followWithToken(runtimeTokens[i], process.env.TWITCH_CLIENT_ID!, broadcasterId); ok=true; }
+        catch (e: any) { lastErr = e?.message; }
       }
+      if (!ok) {
+        const irc = getIRCToken(i);
+        if (irc) {
+          for (const cid of ['q6batx0epp608isickayubi39itsckt', 'kimne78kx3ncx6brgo4mv6wki5h1ko']) {
+            try { await followWithToken(irc, cid, broadcasterId); ok=true; break; }
+            catch (e: any) { lastErr = e?.message; }
+          }
+        }
+      }
+      results.push({ botName, ok, error: ok ? undefined : lastErr });
+      if (ok) await new Promise(r => setTimeout(r, 800));
     }
     res.json({ results });
   });

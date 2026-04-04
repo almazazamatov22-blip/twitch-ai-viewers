@@ -382,7 +382,7 @@ export class AIService extends EventEmitter {
 
   public async generateMessage(context?: string, botPersonality?: string): Promise<string> {
     try {
-      if (!this.currentChannelInfo) return '';
+      // Allow generation even without channel info (use chat context)
 
       let parsedContext: any = {};
       try { if (context) parsedContext = JSON.parse(context); }
@@ -394,15 +394,22 @@ export class AIService extends EventEmitter {
       const lang = process.env.ORIGINAL_STREAM_LANGUAGE || 'ru';
       const channelInfo = this.currentChannelInfo;
 
-      const systemPrompt = botPersonality || `Ты реальный зритель стрима на Twitch. Пиши как человек в чате — коротко, без знаков препинания, без заглавных букв в начале (кроме имён), без восклицательных знаков если это не уместно. Используй разговорный стиль. Можно материться и грубить если ситуация подходит.`;
+      const systemPrompt = botPersonality || `Ты реальный зритель стрима на Twitch. Пиши как человек в чате — коротко, без знаков препинания, строчными буквами. Можно материться. Разговорный стиль.`;
 
-      const prompt = `Стрим: ${channelInfo.title} | Игра: ${channelInfo.gameName} | Язык: ${lang}
-${parsedContext.lastTranscription ? `Стример только что сказал: "${parsedContext.lastTranscription}"` : ''}
-${parsedContext.chatMessage ? `В чате написали: "${parsedContext.chatMessage}"` : ''}
+      const streamCtx = channelInfo 
+        ? `Стрим: ${channelInfo.title} | Игра: ${channelInfo.gameName}` 
+        : 'Twitch стрим';
 
-Напиши ОДНО короткое сообщение в чат (до 40 символов). Без кавычек, без объяснений — только само сообщение. Пиши на языке стрима (${lang}). Реагируй естественно на контекст. Не копируй фразы из контекста дословно.`;
+      const prompt = `${streamCtx} | Язык: ${lang}
+${parsedContext.lastTranscription ? `Стример сказал: "${parsedContext.lastTranscription}"` : ''}
+${parsedContext.chatMessage ? `В чате: "${parsedContext.chatMessage}"` : ''}
+${parsedContext.botMemory ? parsedContext.botMemory : ''}
+
+Напиши ОДНО сообщение в чат (до 50 символов). Только само сообщение, без кавычек и пояснений. Язык: ${lang}.`;
 
       if (!this.groq) return '';
+
+      logger.info('Generating message for context:', parsedContext.lastTranscription?.slice(0, 50) || parsedContext.chatMessage?.slice(0, 50));
 
       const response = await this.groq.chat.completions.create({
         model: "llama-3.3-70b-versatile",
@@ -410,15 +417,20 @@ ${parsedContext.chatMessage ? `В чате написали: "${parsedContext.ch
           { role: "system", content: systemPrompt },
           { role: "user", content: prompt }
         ],
-        max_tokens: 30,
+        max_tokens: 60,
         temperature: 0.9
       });
 
-      const msg = (response.choices[0].message?.content?.trim() || '')
-        .replace(/^["']|["']$/g, '') // remove surrounding quotes
-        .replace(/\.$/, '')           // remove trailing period
-        .slice(0, 60);               // hard limit
+      const raw = response.choices[0].message?.content?.trim() || '';
+      logger.info('Raw generated:', raw);
 
+      const msg = raw
+        .replace(/^["'«»]|["'«»]$/g, '')
+        .replace(/[.!?]+$/, '')
+        .trim()
+        .slice(0, 70);
+
+      logger.info('Final message:', msg);
       return msg;
     } catch (error) {
       logger.error('Error generating message:', error);

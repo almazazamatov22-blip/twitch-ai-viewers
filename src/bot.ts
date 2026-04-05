@@ -25,6 +25,9 @@ export class Bot {
   private aiQueue: string[] = [];
   private isSendingAI = false;
 
+  // Callback to notify server when AI message is actually sent
+  public onAISent?: (message: string, botIndex: number, botName: string) => void;
+
   constructor(config: BotConfig) {
     this.aiService = config.aiService;
     this.shouldHandleVoiceCapture = config.shouldHandleVoiceCapture || false;
@@ -49,7 +52,7 @@ export class Bot {
   private setupEventHandlers() {
     if (!this.client) return;
 
-    // Only bot[0] reads chat (no duplicates)
+    // Only bot[0] reads incoming chat (no duplicates)
     if (this.botIndex === 0) {
       this.client.on('message', (_ch, tags, message, self) => {
         if (self) return;
@@ -75,13 +78,13 @@ export class Bot {
       logger.info(`Bot[${this.botIndex}] ${this.client?.getUsername()} logged in`)
     );
 
-    // Dashboard manual messages
+    // Dashboard manual messages (per-bot)
     this.aiService.on(`manualMessage_${this.botIndex}`, (msg: string) => {
       if (msg?.trim()) { this.manualQueue.push(msg); this.processManualQueue(); }
     });
   }
 
-  // Called by main.ts round-robin - all bots get AI messages
+  // Called by main.ts round-robin dispatcher for AI messages
   public sendAIMessage(message: string) {
     if (message?.trim()) { this.aiQueue.push(message); this.processAIQueue(); }
   }
@@ -91,8 +94,8 @@ export class Bot {
     this.isSendingManual = true;
     while (this.manualQueue.length) {
       const msg = this.manualQueue.shift()!;
-      try { await this.sendMessage(msg); this.messageCount++; }
-      catch (e) { logger.error(`Bot[${this.botIndex}] manual error:`, e); }
+      const sent = await this.sendMessage(msg);
+      if (sent) this.messageCount++;
       if (this.manualQueue.length) await new Promise(r => setTimeout(r, 350));
     }
     this.isSendingManual = false;
@@ -101,11 +104,15 @@ export class Bot {
   private async processAIQueue() {
     if (this.isSendingAI || !this.aiQueue.length) return;
     this.isSendingAI = true;
-    const delay = parseInt(process.env.MESSAGE_INTERVAL || '5000');
+    const delay = Math.max(parseInt(process.env.MESSAGE_INTERVAL || '5000'), 2000);
     while (this.aiQueue.length) {
       const msg = this.aiQueue.shift()!;
-      try { await this.sendMessage(msg); this.messageCount++; }
-      catch (e) { logger.error(`Bot[${this.botIndex}] AI error:`, e); }
+      const sent = await this.sendMessage(msg);
+      if (sent) {
+        this.messageCount++;
+        // Notify dashboard that AI message was actually sent
+        this.onAISent?.(msg, this.botIndex, this.getUsername());
+      }
       if (this.aiQueue.length) await new Promise(r => setTimeout(r, delay));
     }
     this.isSendingAI = false;
@@ -116,12 +123,24 @@ export class Bot {
     catch (e) { logger.error('Voice capture setup error:', e); }
   }
 
-  private async sendMessage(message: string) {
-    if (!this.client || !message) return;
-    const raw = process.env.TWITCH_CHANNEL!;
-    const ch = raw.includes('twitch.tv/')
-      ? raw.split('twitch.tv/')[1].split('/')[0].split('?')[0] : raw;
-    await this.client.say(`#${ch}`, message);
+  // Returns true if message was actually sent
+  private async sendMessage(message: string): Promise<boolean> {
+    if (!this.client || !message) return false;
+    if (!this.isConnected) {
+      logger.warn(`Bot[${this.botIndex}] not connected, skipping message: "${message}"`);
+      return false;
+    }
+    try {
+      const raw = process.env.TWITCH_CHANNEL!;
+      const ch = raw.includes('twitch.tv/')
+        ? raw.split('twitch.tv/')[1].split('/')[0].split('?')[0] : raw;
+      await this.client.say(`#${ch}`, message);
+      logger.info(`Bot[${this.botIndex}] SENT to #${ch}: "${message}"`);
+      return true;
+    } catch (e: any) {
+      logger.error(`Bot[${this.botIndex}] send FAILED: "${message}" | Error: ${e?.message || e}`);
+      return false;
+    }
   }
 
   public connect() {

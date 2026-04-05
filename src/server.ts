@@ -121,131 +121,18 @@ export function startDashboardServer(aiService: AIService, bots: any[]) {
     });
   });
 
-  // ── OAuth flow for better follow token ───────────
-  app.get('/auth', (req, res) => {
-    const botIdx = parseInt(String(req.query.bot || '0'));
-    const host = req.headers.host || 'localhost';
-    const proto = host.includes('localhost') ? 'http' : 'https';
-    const redirectUri = `${proto}://${host}/auth/callback`;
-    const scope = 'user:edit:follows user:read:email channel:read:subscriptions';
-    const url = `https://id.twitch.tv/oauth2/authorize?client_id=${process.env.TWITCH_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=${botIdx}&force_verify=true`;
-    res.redirect(url);
+  // ── Follow (removed - Twitch API closed in 2023) ──
+  app.post('/api/follow', (_req, res) => {
+    res.status(410).json({ 
+      error: 'Follow через API невозможен — Twitch закрыл этот эндпоинт в 2023 году. Подпишись вручную через браузер.',
+      gone: true
+    });
+  });
+  app.post('/api/follow-all', (_req, res) => {
+    res.status(410).json({ error: 'Follow API removed by Twitch in 2023', gone: true });
   });
 
-  app.get('/auth/callback', (_req, res) => {
-    res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Auth</title>
-<style>body{background:#0e0e10;color:#efeff1;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;margin:0}.ok{color:#00c853;font-size:20px}.err{color:#e53935}</style></head><body>
-<div id="msg">Авторизация...</div>
-<script>
-const p=new URLSearchParams(window.location.hash.substring(1));
-const t=p.get('access_token'),s=p.get('state')||'0',m=document.getElementById('msg');
-if(t){
-  fetch('/auth/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:t,botIndex:parseInt(s)})})
-  .then(r=>r.json()).then(d=>{
-    m.innerHTML=d.ok?'<span class="ok">✓ Авторизован: '+d.botName+'</span><br><small style="opacity:.6">Закрой окно и нажми ♥</small>':'<span class="err">'+d.error+'</span>';
-  });
-}else{m.innerHTML='<span class="err">'+(p.get('error_description')||'Нет токена')+'</span>';}
-</script></body></html>`);
-  });
-
-  app.post('/auth/save', async (req, res) => {
-    const { token, botIndex = 0 } = req.body;
-    if (!token) return res.status(400).json({ error: 'No token' });
-    try {
-      const meResp = await axios.get('https://api.twitch.tv/helix/users', {
-        headers: { 'Client-ID': process.env.TWITCH_CLIENT_ID!, 'Authorization': `Bearer ${token}` }
-      });
-      const username = meResp.data.data[0]?.login;
-      if (!username) throw new Error('Token invalid');
-      const idx = parseInt(String(botIndex));
-      runtimeTokens[idx] = token;
-      logger.info(`Auth token saved for bot[${idx}] = ${username}`);
-      io.emit('bot-state', {});
-      res.json({ ok: true, botName: username });
-    } catch (e: any) {
-      res.status(500).json({ error: e?.response?.data?.message || e?.message || 'Failed' });
-    }
-  });
-
-  // ── Follow (tries user token first, then IRC token) ──
-  app.post('/api/follow', async (req, res) => {
-    const idx = parseInt(String(req.body.botIndex || 0));
-    const botName = bots[idx]?.getUsername?.() || `Bot${idx + 1}`;
-    let lastErr = 'No tokens available';
-
-    try {
-      const broadcasterId = await getChannelId(getChannelName());
-      
-      // Try 1: user token from /auth flow (uses our app's client ID)
-      if (runtimeTokens[idx]) {
-        try {
-          await followWithToken(runtimeTokens[idx], process.env.TWITCH_CLIENT_ID!, broadcasterId);
-          logger.info(`${botName} followed via user token`);
-          return res.json({ ok: true, botName });
-        } catch (e: any) { lastErr = e?.message; logger.warn(`User token follow failed: ${lastErr}`); }
-      }
-
-      // Try 2: IRC token with twitchapps client ID (q6batx0epp608isickayubi39itsckt)
-      const ircToken = getIRCToken(idx);
-      if (ircToken) {
-        try {
-          await followWithToken(ircToken, 'q6batx0epp608isickayubi39itsckt', broadcasterId);
-          logger.info(`${botName} followed via IRC token + twitchapps clientId`);
-          return res.json({ ok: true, botName });
-        } catch (e: any) { lastErr = e?.message; logger.warn(`IRC+twitchapps failed: ${lastErr}`); }
-
-        // Try 3: IRC token with Twitch web client ID
-        try {
-          await followWithToken(ircToken, 'kimne78kx3ncx6brgo4mv6wki5h1ko', broadcasterId);
-          logger.info(`${botName} followed via IRC token + Twitch web clientId`);
-          return res.json({ ok: true, botName });
-        } catch (e: any) { lastErr = e?.message; logger.warn(`IRC+twitch-web failed: ${lastErr}`); }
-      }
-
-      // All failed - suggest /auth
-      const host = req.headers.host;
-      res.status(401).json({ 
-        error: lastErr, 
-        hint: `Авторизуй бота: нажми 🔑 у ${botName}`,
-        authUrl: `https://${host}/auth?bot=${idx}`
-      });
-    } catch (e: any) {
-      res.status(500).json({ error: e?.message });
-    }
-  });
-
-  app.post('/api/follow-all', async (_req, res) => {
-    const results: any[] = [];
-    let broadcasterId = '';
-    try { broadcasterId = await getChannelId(getChannelName()); }
-    catch (e) { return res.status(500).json({ error: 'Could not get channel ID' }); }
-
-    for (let i = 0; i < bots.length; i++) {
-      const botName = bots[i]?.getUsername?.() || `Bot${i + 1}`;
-      let ok = false;
-      let lastErr = 'no tokens';
-      
-      // Try user token first
-      if (runtimeTokens[i]) {
-        try { await followWithToken(runtimeTokens[i], process.env.TWITCH_CLIENT_ID!, broadcasterId); ok=true; }
-        catch (e: any) { lastErr = e?.message; }
-      }
-      if (!ok) {
-        const irc = getIRCToken(i);
-        if (irc) {
-          for (const cid of ['q6batx0epp608isickayubi39itsckt', 'kimne78kx3ncx6brgo4mv6wki5h1ko']) {
-            try { await followWithToken(irc, cid, broadcasterId); ok=true; break; }
-            catch (e: any) { lastErr = e?.message; }
-          }
-        }
-      }
-      results.push({ botName, ok, error: ok ? undefined : lastErr });
-      if (ok) await new Promise(r => setTimeout(r, 800));
-    }
-    res.json({ results });
-  });
-
-  // ── Watch ───────────────────────────────────────
+    // ── Watch ───────────────────────────────────────
   app.post('/api/watch', async (req, res) => {
     const idx = parseInt(String(req.body.botIndex || 0));
     const botName = bots[idx]?.getUsername?.() || `Bot${idx + 1}`;

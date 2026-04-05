@@ -11,7 +11,7 @@ const requiredEnvVars = ['TWITCH_CHANNEL', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SE
 for (const envVar of requiredEnvVars) {
   if (!process.env[envVar]) {
     logger.error(`Missing required environment variable: ${envVar}`);
-    throw new Error(`Missing required environment variable: ${envVar}`);
+    throw new Error(`Missing: ${envVar}`);
   }
 }
 
@@ -20,7 +20,7 @@ const bots: Bot[] = [];
 let isShuttingDown = false;
 
 async function shutdown() {
-  if (isShuttingDown) return; // prevent cascading shutdown calls
+  if (isShuttingDown) return;
   isShuttingDown = true;
   logger.info('Shutting down...');
   for (const bot of bots) {
@@ -44,8 +44,8 @@ async function main() {
       i++;
     }
 
-    if (botCredentials.length === 0)
-      throw new Error('No bot credentials found. Set BOT1_USERNAME and BOT1_OAUTH_TOKEN');
+    if (!botCredentials.length)
+      throw new Error('No bot credentials. Set BOT1_USERNAME and BOT1_OAUTH_TOKEN');
 
     logger.info(`Found ${botCredentials.length} bot(s)`);
 
@@ -53,7 +53,6 @@ async function main() {
     const channelName = channelUrl.includes('twitch.tv/')
       ? channelUrl.split('twitch.tv/')[1].split('/')[0].split('?')[0]
       : channelUrl;
-
     logger.info(`Channel: ${channelName}`);
 
     for (let idx = 0; idx < botCredentials.length; idx++) {
@@ -73,10 +72,21 @@ async function main() {
       }
     }
 
-    // Each bot has its own personality and memory
+    // Start dashboard - get io reference to emit bot-sent events
+    const { io } = startDashboardServer(aiService, bots);
+
+    // Hook up bot callbacks to emit to dashboard
+    bots.forEach(bot => {
+      bot.onAISent = (message, botIndex, botName) => {
+        io.emit('bot-sent', { message, botIndex, botName, manual: false, time: Date.now() });
+        logger.info(`Dashboard notified: bot[${botIndex}] sent "${message}"`);
+      };
+    });
+
+    // Per-bot memory
     const botMemories: BotMemory[] = bots.map(() => new BotMemory(15));
 
-    // Round-robin: distribute AI messages across ALL connected bots
+    // Round-robin AI messages across all connected bots
     let rrIndex = 0;
     aiService.on('message', (message: string) => {
       if (!message?.trim()) return;
@@ -87,39 +97,38 @@ async function main() {
         rrIndex++;
         attempts++;
         if (bot.isBotConnected()) {
-          // Add to bot's memory
           botMemories[idx]?.add(message);
           bot.sendAIMessage(message);
           logger.info(`AI → bot[${idx}] ${bot.getUsername()}: "${message}"`);
           return;
         }
       }
-      if (bots.length > 0) bots[0].sendAIMessage(message);
+      // Fallback: first available bot
+      for (const bot of bots) {
+        if (bot.isBotConnected()) { bot.sendAIMessage(message); return; }
+      }
     });
 
-    // When chat comes in, pick a random connected bot to generate a contextual reply
+    // Chat messages → random bot generates reply with its personality
     aiService.on('chatMessage', async (contextJson: string) => {
       const connectedBots = bots.filter(b => b.isBotConnected());
       if (!connectedBots.length) return;
-      
-      // Pick random bot weighted by replyChance
+
       const candidates = connectedBots.filter(b => {
         const p = getPersonality(b.getBotIndex());
         return Math.random() < p.replyChance;
       });
-      
       if (!candidates.length) return;
+
       const bot = candidates[Math.floor(Math.random() * candidates.length)];
       const idx = bot.getBotIndex();
       const personality = getPersonality(idx);
       const memory = botMemories[idx];
-      
+
       try {
-        const contextWithMemory = JSON.stringify({
-          ...JSON.parse(contextJson),
-          botMemory: memory.getContext(),
-        });
-        const msg = await aiService.generateMessage(contextWithMemory, personality.systemPrompt);
+        const ctx = JSON.parse(contextJson);
+        ctx.botMemory = memory.getContext();
+        const msg = await aiService.generateMessage(JSON.stringify(ctx), personality.systemPrompt);
         if (msg?.trim()) {
           memory.add(msg);
           bot.sendAIMessage(msg);
@@ -130,21 +139,19 @@ async function main() {
       }
     });
 
-    startDashboardServer(aiService, bots);
-
-    // Ignore disconnect errors - don't let them trigger shutdown
+    // Suppress disconnect spam
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
-    process.on('uncaughtException', (error) => {
-      const msg = String(error);
+    process.on('uncaughtException', (err) => {
+      const msg = String(err);
       if (msg.includes('Socket is not opened') || msg.includes('Cannot disconnect')) return;
-      logger.error('Uncaught exception:', error);
+      logger.error('Uncaught exception:', err);
       shutdown();
     });
-    process.on('unhandledRejection', (error) => {
-      const msg = String(error);
+    process.on('unhandledRejection', (err) => {
+      const msg = String(err);
       if (msg.includes('Socket is not opened') || msg.includes('Cannot disconnect')) return;
-      logger.error('Unhandled rejection:', error);
+      logger.error('Unhandled rejection:', err);
     });
 
   } catch (error) {

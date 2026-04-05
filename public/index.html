@@ -271,13 +271,16 @@ document.getElementById('bot-list').addEventListener('click', async e => {
       fb.textContent='✓'; fb.classList.add('done'); toast(r.botName+' подписан! ♥');
     } else if (r.authUrl) {
       fb.textContent='🔑';
-      const popup = window.open(r.authUrl,'follow-auth','width=520,height=620,scrollbars=yes');
-      toast('Войди под аккаунтом '+(botList[idx]?.username||'бота')+' → потом снова нажми ♥',7000);
+      const popup = window.open(r.authUrl,'follow-auth','width=520,height=650,scrollbars=yes');
+      toast('Войди под аккаунтом '+(botList[idx]?.username||'бота')+' в открывшемся окне → потом нажми ♥',8000);
       const poll = setInterval(async()=>{
         const st=await fetch('/api/status').then(x=>x.json()).catch(()=>null);
-        if(st?.bots?.[idx]?.hasFollowToken){clearInterval(poll);try{popup?.close();}catch(_){}fb.textContent='♥';toast('Авторизован! Нажми ♥');loadStatus();}
+        if(st?.bots?.[idx]?.hasFollowToken){
+          clearInterval(poll); try{popup?.close();}catch(_){}
+          fb.textContent='♥'; toast('Готово! Нажми ♥'); loadStatus();
+        }
       },2000);
-      setTimeout(()=>clearInterval(poll),120000);
+      setTimeout(()=>clearInterval(poll),180000);
     } else {
       fb.textContent=orig; toast('Ошибка: '+(r.error||'?'),5000);
     }

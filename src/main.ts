@@ -9,7 +9,7 @@ dotenv.config();
 
 const requiredEnvVars = ['TWITCH_CHANNEL', 'TWITCH_CLIENT_ID', 'TWITCH_CLIENT_SECRET', 'GROQ_API_KEY'];
 for (const v of requiredEnvVars) {
-  if (!process.env[v]) throw new Error(`Missing env var: ${v}`);
+  if (!process.env[v]) throw new Error(`Missing: ${v}`);
 }
 
 const aiService = new AIService();
@@ -25,83 +25,92 @@ async function shutdown() {
   process.exit(0);
 }
 
-// Shared context: recent messages from all sources
-const sharedContext = {
-  recentTranscription: '',
-  recentChat: [] as { username: string; message: string }[],
-  recentBotMessages: [] as { botName: string; message: string }[],
-};
-
-function addToSharedChat(username: string, message: string) {
-  sharedContext.recentChat.push({ username, message });
-  if (sharedContext.recentChat.length > 10) sharedContext.recentChat.shift();
+// Get channel name for memory namespacing
+function getChannelName(): string {
+  const ch = process.env.TWITCH_CHANNEL || '';
+  return ch.includes('twitch.tv/') ? ch.split('twitch.tv/')[1].split('/')[0].split('?')[0] : ch;
 }
 
-function addBotMessage(botName: string, message: string) {
-  sharedContext.recentBotMessages.push({ botName, message });
-  if (sharedContext.recentBotMessages.length > 8) sharedContext.recentBotMessages.shift();
+// Rate limiting: track last send time per bot
+const lastSendTime: Record<number, number> = {};
+function canSend(botIndex: number, minInterval: number): boolean {
+  const last = lastSendTime[botIndex] || 0;
+  return Date.now() - last >= minInterval;
+}
+function markSent(botIndex: number) {
+  lastSendTime[botIndex] = Date.now();
 }
 
-function buildContext(memory: BotMemory, trigger: 'timer' | 'chat' | 'crosstalk'): string {
-  const parts: string[] = [];
+// Shared context
+let lastTranscription = '';
+let lastTranscriptionTime = 0;
+const recentChat: { username: string; message: string; time: number }[] = [];
 
-  if (sharedContext.recentTranscription)
-    parts.push(`Стример говорит: "${sharedContext.recentTranscription.slice(0, 200)}"`);
-
-  if (sharedContext.recentChat.length > 0) {
-    const chatLines = sharedContext.recentChat.slice(-4)
-      .map(m => `${m.username}: ${m.message}`).join('\n');
-    parts.push(`Последние сообщения чата:\n${chatLines}`);
-  }
-
-  if (trigger === 'crosstalk' && sharedContext.recentBotMessages.length > 0) {
-    const botLines = sharedContext.recentBotMessages.slice(-3)
-      .map(m => `${m.botName}: ${m.message}`).join('\n');
-    parts.push(`Другие боты написали:\n${botLines}`);
-  }
-
-  const myRecent = memory.getContext();
-  if (myRecent) parts.push(myRecent);
-
-  return parts.join('\n\n');
-}
-
-async function generateForBot(bot: Bot, memory: BotMemory, trigger: 'timer' | 'chat' | 'crosstalk'): Promise<void> {
-  if (!bot.isBotConnected()) return;
-
+async function tryGenerate(
+  bot: Bot,
+  memory: BotMemory,
+  trigger: 'timer' | 'chat' | 'transcription',
+  replyTo?: string,
+): Promise<void> {
   const idx = bot.getBotIndex();
   const personality = PERSONALITIES[idx % PERSONALITIES.length];
 
+  // Strict rate limit
+  if (!canSend(idx, personality.minInterval)) return;
+
+  // Require meaningful context
+  const now = Date.now();
+  const hasRecentTranscription = lastTranscription.length > 20 && (now - lastTranscriptionTime) < 120000;
+  const hasRecentChat = recentChat.length > 0 && (now - recentChat[recentChat.length - 1].time) < 60000;
+
+  if (!hasRecentTranscription && !hasRecentChat && trigger !== 'timer') return;
+
+  if (!bot.isBotConnected()) return;
+
   try {
-    const contextStr = buildContext(memory, trigger);
-    if (!contextStr.trim() && trigger === 'timer') {
-      // No context at all - generate based on game/stream only
+    const parts: string[] = [];
+
+    if (hasRecentTranscription)
+      parts.push(`Стример говорит: "${lastTranscription.slice(0, 250)}"`);
+
+    if (hasRecentChat) {
+      const chatLines = recentChat.slice(-4).map(m => `${m.username}: ${m.message}`).join('\n');
+      parts.push(`Чат:\n${chatLines}`);
     }
 
+    if (replyTo)
+      parts.push(`Тебе написали: "${replyTo}" — ответь им в тегом @`);
+
+    parts.push(memory.getContext());
+
     const contextJson = JSON.stringify({
-      lastTranscription: sharedContext.recentTranscription.slice(0, 300),
-      chatMessage: sharedContext.recentChat.slice(-2).map(m => `${m.username}: ${m.message}`).join(' | '),
+      lastTranscription: hasRecentTranscription ? lastTranscription.slice(0, 250) : '',
+      chatMessage: hasRecentChat ? recentChat.slice(-3).map(m => `${m.username}: ${m.message}`).join(' | ') : '',
       botMemory: memory.getContext(),
-      crossTalk: trigger === 'crosstalk'
-        ? sharedContext.recentBotMessages.slice(-2).map(m => `${m.botName}: ${m.message}`).join(' | ')
-        : '',
-      trigger,
+      replyTo: replyTo || '',
     });
 
     const msg = await aiService.generateMessage(contextJson, personality.system);
-    if (msg?.trim()) {
-      memory.add(msg);
-      addBotMessage(bot.getUsername(), msg);
-      bot.sendAIMessage(msg);
-      logger.info(`Bot[${idx}] ${trigger}: "${msg}"`);
+
+    if (!msg?.trim()) return;
+
+    // Dedup check
+    if (memory.isDuplicate(msg)) {
+      logger.info(`Bot[${idx}] dedup skip: "${msg}"`);
+      return;
     }
+
+    markSent(idx);
+    memory.addSent(msg);
+    bot.sendAIMessage(msg);
+    logger.info(`Bot[${idx}] ${trigger}: "${msg}"`);
   } catch (e) {
     logger.error(`Bot[${idx}] generate error:`, e);
   }
 }
 
-// Schedule next message for a bot with jitter
-function scheduleBot(bot: Bot, memory: BotMemory) {
+// Per-bot independent timer
+function scheduleBotTimer(bot: Bot, memory: BotMemory) {
   const idx = bot.getBotIndex();
   const personality = PERSONALITIES[idx % PERSONALITIES.length];
   const delay = personality.minInterval +
@@ -109,8 +118,8 @@ function scheduleBot(bot: Bot, memory: BotMemory) {
 
   setTimeout(async () => {
     if (isShuttingDown) return;
-    await generateForBot(bot, memory, 'timer');
-    scheduleBot(bot, memory); // reschedule
+    await tryGenerate(bot, memory, 'timer');
+    scheduleBotTimer(bot, memory);
   }, delay);
 }
 
@@ -126,13 +135,10 @@ async function main() {
     botCredentials.push({ username, oauth });
     i++;
   }
-
   if (!botCredentials.length) throw new Error('No bot credentials');
-  logger.info(`Found ${botCredentials.length} bot(s)`);
 
-  const channelUrl = process.env.TWITCH_CHANNEL!;
-  const channelName = channelUrl.includes('twitch.tv/')
-    ? channelUrl.split('twitch.tv/')[1].split('/')[0].split('?')[0] : channelUrl;
+  logger.info(`Found ${botCredentials.length} bot(s)`);
+  const channelName = getChannelName();
   logger.info(`Channel: ${channelName}`);
 
   const botMemories: BotMemory[] = [];
@@ -148,84 +154,95 @@ async function main() {
         botIndex: idx,
       });
       bots.push(bot);
-      botMemories.push(new BotMemory(15));
+      botMemories.push(new BotMemory(channelName, idx));
       bot.connect();
     } catch (e) {
       logger.error(`Error creating bot ${botCredentials[idx].username}:`, e);
-      botMemories.push(new BotMemory(15)); // keep index aligned
+      botMemories.push(new BotMemory(channelName, idx));
     }
   }
 
   const { io } = startDashboardServer(aiService, bots);
 
-  // Hook callbacks
   bots.forEach(bot => {
     bot.onAISent = (message, botIndex, botName) => {
       io.emit('bot-sent', { message, botIndex, botName, manual: false, time: Date.now() });
     };
   });
 
-  // Listen for incoming transcription
+  // Transcription → update shared context, one random bot MIGHT reply
   aiService.on('transcription', (text: string) => {
-    sharedContext.recentTranscription = text;
+    lastTranscription = text;
+    lastTranscriptionTime = Date.now();
   });
 
-  // Listen for incoming chat
-  aiService.on('incomingChat', (data: any) => {
-    addToSharedChat(data.username, data.message);
-    io.emit('incoming-chat', data);
-  });
-
-  // When transcription arrives → some bots react based on selfTalkChance
+  // AI generated message → route to ONE random connected bot
   aiService.on('message', (message: string) => {
     if (!message?.trim()) return;
-    // Route through personalities independently
-    bots.forEach((bot, idx) => {
-      const personality = PERSONALITIES[idx % PERSONALITIES.length];
-      if (Math.random() < personality.selfTalkChance) {
-        generateForBot(bot, botMemories[idx], 'timer');
-      }
+    const connected = bots.filter(b => b.isBotConnected());
+    if (!connected.length) return;
+
+    // Pick a random connected bot that hasn't sent recently
+    const eligible = connected.filter(b => {
+      const p = PERSONALITIES[b.getBotIndex() % PERSONALITIES.length];
+      return canSend(b.getBotIndex(), p.minInterval);
     });
+    if (!eligible.length) return;
+
+    const bot = eligible[Math.floor(Math.random() * eligible.length)];
+    const idx = bot.getBotIndex();
+    const memory = botMemories[idx];
+
+    if (memory.isDuplicate(message)) return;
+
+    markSent(idx);
+    memory.addSent(message);
+    bot.sendAIMessage(message);
+    logger.info(`AI → bot[${idx}] ${bot.getUsername()}: "${message}"`);
+    io.emit('bot-sent', { message, botIndex: idx, botName: bot.getUsername(), manual: false, time: Date.now() });
   });
 
-  // When chat message arrives → some bots reply
-  aiService.on('chatMessage', (contextJson: string) => {
-    try {
-      const ctx = JSON.parse(contextJson);
-      addToSharedChat(ctx.username, ctx.chatMessage);
+  // Incoming chat → update context, maybe ONE bot replies
+  aiService.on('incomingChat', (data: any) => {
+    io.emit('incoming-chat', data);
 
-      bots.forEach((bot, idx) => {
-        const personality = PERSONALITIES[idx % PERSONALITIES.length];
-        if (Math.random() < personality.replyChance) {
-          setTimeout(() => {
-            generateForBot(bot, botMemories[idx], 'chat');
-          }, Math.random() * 8000 + 1000); // 1-9s delay so they don't all reply at once
+    // Add to recent chat
+    recentChat.push({ username: data.username, message: data.message, time: Date.now() });
+    if (recentChat.length > 15) recentChat.shift();
+
+    // Remember viewers
+    botMemories.forEach(m => m.addViewer(data.username));
+
+    // Only ONE bot replies to chat (prevents spam)
+    // Pick bot by probability, only one wins
+    const connected = bots.filter(b => b.isBotConnected());
+    if (!connected.length) return;
+
+    const personality = PERSONALITIES;
+    const rolls = connected.map(b => ({
+      bot: b,
+      roll: Math.random() * personality[b.getBotIndex() % personality.length].chatReplyChance
+    }));
+    const winner = rolls.reduce((best, cur) => cur.roll > best.roll ? cur : best, rolls[0]);
+
+    if (winner.roll > 0.1) { // at least some probability needed
+      const delay = Math.random() * 12000 + 3000; // 3-15s delay
+      setTimeout(() => {
+        if (!isShuttingDown) {
+          const replyTo = data.isStreamer ? undefined : undefined; // only @tag if making sense
+          tryGenerate(winner.bot, botMemories[winner.bot.getBotIndex()], 'chat');
         }
-      });
-
-      // Cross-talk: bots occasionally react to other bots
-      if (sharedContext.recentBotMessages.length > 0) {
-        bots.forEach((bot, idx) => {
-          const personality = PERSONALITIES[idx % PERSONALITIES.length];
-          if (Math.random() < personality.crossTalkChance) {
-            setTimeout(() => {
-              generateForBot(bot, botMemories[idx], 'crosstalk');
-            }, Math.random() * 15000 + 5000);
-          }
-        });
-      }
-    } catch (_) {}
+      }, delay);
+    }
   });
 
-  // Start independent timers for each bot (staggered start)
+  // Start independent timers (staggered)
   bots.forEach((bot, idx) => {
-    const personality = PERSONALITIES[idx % PERSONALITIES.length];
-    // Stagger initial messages: 10s, 20s, 35s, 50s
-    const initialDelay = (idx + 1) * 10000 + Math.random() * 10000;
+    const stagger = (idx + 1) * 15000 + Math.random() * 10000;
     setTimeout(() => {
-      if (!isShuttingDown) scheduleBot(bot, botMemories[idx]);
-    }, initialDelay);
-    logger.info(`Bot[${idx}] timer starts in ${Math.round(initialDelay/1000)}s, interval ${personality.minInterval/1000}-${personality.maxInterval/1000}s`);
+      if (!isShuttingDown) scheduleBotTimer(bot, botMemories[idx]);
+    }, stagger);
+    logger.info(`Bot[${idx}] timer starts in ${Math.round(stagger/1000)}s`);
   });
 
   process.on('SIGINT', shutdown);
@@ -233,13 +250,12 @@ async function main() {
   process.on('uncaughtException', (err) => {
     const msg = String(err);
     if (msg.includes('Socket is not opened') || msg.includes('Cannot disconnect')) return;
-    logger.error('Uncaught exception:', err);
-    shutdown();
+    logger.error('Uncaught:', err); shutdown();
   });
   process.on('unhandledRejection', (err) => {
     const msg = String(err);
     if (msg.includes('Socket is not opened') || msg.includes('Cannot disconnect')) return;
-    logger.error('Unhandled rejection:', err);
+    logger.error('Rejection:', err);
   });
 }
 

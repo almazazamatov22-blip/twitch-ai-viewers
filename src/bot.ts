@@ -14,11 +14,11 @@ interface BotConfig {
 export class Bot {
   private client: tmi.Client | null = null;
   private aiService: AIService;
-  private messageCount: number = 0;
-  private shouldHandleVoiceCapture: boolean;
   private isConnected: boolean = false;
   private botIndex: number;
   private channelName: string;
+  private messageCount: number = 0;
+  private shouldHandleVoiceCapture: boolean;
 
   private manualQueue: string[] = [];
   private isSendingManual = false;
@@ -34,7 +34,7 @@ export class Bot {
     this.channelName = config.channel;
 
     if (!config.oauth.startsWith('oauth:'))
-      throw new Error(`Invalid OAuth for ${config.username} - must start with 'oauth:'`);
+      throw new Error(`Invalid OAuth for ${config.username}`);
 
     this.client = new tmi.Client({
       options: { debug: false, messagesLogLevel: 'info' },
@@ -51,7 +51,6 @@ export class Bot {
   private setupEventHandlers() {
     if (!this.client) return;
 
-    // Only bot[0] reads chat (no duplicates)
     if (this.botIndex === 0) {
       this.client.on('message', (_ch, tags, message, self) => {
         if (self) return;
@@ -62,8 +61,6 @@ export class Bot {
         this.aiService.emit('incomingChat', {
           id: tags.id, username, message, isStreamer, color: tags.color
         });
-        // Emit to all bots for chat awareness
-        this.aiService.emit('chatMessage', JSON.stringify({ chatMessage: message, username }));
       });
     }
 
@@ -109,7 +106,7 @@ export class Bot {
         this.messageCount++;
         this.onAISent?.(msg, this.botIndex, this.getUsername());
       }
-      if (this.aiQueue.length) await new Promise(r => setTimeout(r, 1500));
+      if (this.aiQueue.length) await new Promise(r => setTimeout(r, 2000));
     }
     this.isSendingAI = false;
   }
@@ -122,7 +119,7 @@ export class Bot {
   private async sendMessage(message: string): Promise<boolean> {
     if (!this.client || !message) return false;
     if (!this.isConnected) {
-      logger.warn(`Bot[${this.botIndex}] not connected, skip: "${message}"`);
+      logger.warn(`Bot[${this.botIndex}] not connected, skip`);
       return false;
     }
     try {
@@ -133,7 +130,7 @@ export class Bot {
       logger.info(`Bot[${this.botIndex}] SENT: "${message}"`);
       return true;
     } catch (e: any) {
-      logger.error(`Bot[${this.botIndex}] FAILED: "${message}" | ${e?.message}`);
+      logger.error(`Bot[${this.botIndex}] FAILED: ${e?.message}`);
       return false;
     }
   }

@@ -29,7 +29,7 @@ const followTokens: Record<number, string> = (() => {
   try { if (fs.existsSync(TOKENS_FILE)) return JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf-8')); } catch (_) {}
   return {};
 })();
-function saveFollowTokens() { try { fs.writeFileSync(TOKENS_FILE, JSON.stringify(followTokens)); } catch (_) {} }
+function saveFollowTokens() { try { fs.writeFileSync(TOKENS_FILE, JSON.stringify(followTokens, null, 2)); logger.info(`Tokens saved: ${JSON.stringify(Object.keys(followTokens))}`); } catch (_) {} }
 
 function getChannelName(): string {
   const ch = process.env.TWITCH_CHANNEL || '';
@@ -162,6 +162,10 @@ if(t){
   app.post('/api/follow', async (req, res) => {
     const idx = parseInt(String(req.body.botIndex || 0));
     const botName = bots[idx]?.getUsername?.() || `Bot${idx + 1}`;
+
+    // Debug: log all known tokens
+    const knownTokens = Object.keys(followTokens);
+    logger.info(`Follow request for bot[${idx}], known token indices: [${knownTokens.join(',')}], hasToken: ${!!followTokens[idx]}`);
 
     if (!followTokens[idx]) {
       const host = req.headers.host;

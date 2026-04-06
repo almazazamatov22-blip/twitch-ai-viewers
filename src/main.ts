@@ -46,6 +46,9 @@ let lastTranscription = '';
 let lastTranscriptionTime = 0;
 const recentChat: { username: string; message: string; time: number }[] = [];
 
+// Track last few messages from ALL bots for cross-dedup
+const allRecentBotMessages: string[] = [];
+
 async function tryGenerate(
   bot: Bot,
   memory: BotMemory,
@@ -55,53 +58,43 @@ async function tryGenerate(
   const idx = bot.getBotIndex();
   const personality = PERSONALITIES[idx % PERSONALITIES.length];
 
-  // Strict rate limit
   if (!canSend(idx, personality.minInterval)) return;
-
-  // Require meaningful context
-  const now = Date.now();
-  const hasRecentTranscription = lastTranscription.length > 20 && (now - lastTranscriptionTime) < 120000;
-  const hasRecentChat = recentChat.length > 0 && (now - recentChat[recentChat.length - 1].time) < 60000;
-
-  if (!hasRecentTranscription && !hasRecentChat && trigger !== 'timer') return;
-
   if (!bot.isBotConnected()) return;
 
+  const now = Date.now();
+  const hasTranscription = lastTranscription.length > 20 && (now - lastTranscriptionTime) < 120000;
+  const hasChat = recentChat.length > 0 && (now - recentChat[recentChat.length - 1].time) < 60000;
+
+  if (!hasTranscription && !hasChat && trigger !== 'timer') return;
+
   try {
-    const parts: string[] = [];
-
-    if (hasRecentTranscription)
-      parts.push(`Стример говорит: "${lastTranscription.slice(0, 250)}"`);
-
-    if (hasRecentChat) {
-      const chatLines = recentChat.slice(-4).map(m => `${m.username}: ${m.message}`).join('\n');
-      parts.push(`Чат:\n${chatLines}`);
-    }
-
-    if (replyTo)
-      parts.push(`Тебе написали: "${replyTo}" — ответь им в тегом @`);
-
-    parts.push(memory.getContext());
+    // Include what OTHER bots said to avoid same message
+    const otherBotCtx = allRecentBotMessages.length > 0
+      ? `Другие зрители уже написали: ${allRecentBotMessages.slice(-4).join(' | ')}. Напиши что-то ДРУГОЕ.`
+      : '';
 
     const contextJson = JSON.stringify({
-      lastTranscription: hasRecentTranscription ? lastTranscription.slice(0, 250) : '',
-      chatMessage: hasRecentChat ? recentChat.slice(-3).map(m => `${m.username}: ${m.message}`).join(' | ') : '',
-      botMemory: memory.getContext(),
+      lastTranscription: hasTranscription ? lastTranscription.slice(0, 300) : '',
+      chatMessage: hasChat ? recentChat.slice(-3).map(m => `${m.username}: ${m.message}`).join(' | ') : '',
+      botMemory: memory.getContext() + (otherBotCtx ? '\n' + otherBotCtx : ''),
       replyTo: replyTo || '',
     });
 
     const msg = await aiService.generateMessage(contextJson, personality.system);
-
     if (!msg?.trim()) return;
 
-    // Dedup check
-    if (memory.isDuplicate(msg)) {
-      logger.info(`Bot[${idx}] dedup skip: "${msg}"`);
-      return;
+    // Dedup vs own history AND other bots
+    if (memory.isDuplicate(msg)) { logger.info(`Bot[${idx}] own-dedup: "${msg}"`); return; }
+    const msgLow = msg.toLowerCase().trim();
+    if (allRecentBotMessages.some(m => m.toLowerCase().trim() === msgLow)) {
+      logger.info(`Bot[${idx}] cross-dedup: "${msg}"`); return;
     }
 
     markSent(idx);
     memory.addSent(msg);
+    allRecentBotMessages.push(msg);
+    if (allRecentBotMessages.length > 20) allRecentBotMessages.shift();
+
     bot.sendAIMessage(msg);
     logger.info(`Bot[${idx}] ${trigger}: "${msg}"`);
   } catch (e) {
@@ -170,30 +163,34 @@ async function main() {
     };
   });
 
-  // Transcription → update context, ALL eligible bots independently decide to react
+  // Transcription update - store context
   aiService.on('transcription', (text: string) => {
     lastTranscription = text;
     lastTranscriptionTime = Date.now();
   });
 
-  // AI generated message from transcription → each bot independently generates its own response
-  aiService.on('message', async (_rawMessage: string) => {
-    // _rawMessage is the transcription result — each bot generates its OWN message
+  // When AI has a full transcription chunk ready → all eligible bots react
+  // But spaced out evenly so chat has continuous activity (not burst)
+  aiService.on('message', async (_rawMsg: string) => {
     const connected = bots.filter(b => b.isBotConnected());
     if (!connected.length) return;
 
-    // Each bot independently decides to respond based on its rate limit
-    for (const bot of connected) {
-      const idx = bot.getBotIndex();
-      const personality = PERSONALITIES[idx % PERSONALITIES.length];
-      if (!canSend(idx, personality.minInterval)) continue;
+    const eligible = connected.filter(b => {
+      const p = PERSONALITIES[b.getBotIndex() % PERSONALITIES.length];
+      return canSend(b.getBotIndex(), p.minInterval);
+    });
+    if (!eligible.length) return;
 
-      // Stagger so they don't all send at exactly the same time
-      const delay = Math.random() * 20000; // up to 20s stagger
+    // Spread bots evenly across 30 seconds so chat has steady flow
+    const spreadMs = 30000;
+    const slotSize = spreadMs / (eligible.length + 1);
+
+    eligible.forEach((bot, i) => {
+      const delay = slotSize * (i + 1) + Math.random() * 5000;
       setTimeout(() => {
-        if (!isShuttingDown) tryGenerate(bot, botMemories[idx], 'transcription');
+        if (!isShuttingDown) tryGenerate(bot, botMemories[bot.getBotIndex()], 'transcription');
       }, delay);
-    }
+    });
   });
 
   // Incoming chat → update context, at most ONE bot replies per message

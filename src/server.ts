@@ -100,19 +100,19 @@ export function startDashboardServer(aiService: AIService, bots: any[]) {
   // ── Follow OAuth ──────────────────────────────────────────────────────────
   // Uses USER'S OWN Twitch app (TWITCH_CLIENT_ID) because they registered
   // https://twitch-ai-viewers-production.up.railway.app/auth/callback in their app
+  // OAuth - uses user's own TWITCH_CLIENT_ID with registered redirect URL /auth/callback
   app.get('/auth/follow', (req, res) => {
     const botIdx = parseInt(String(req.query.bot || '0'));
     const host = req.headers.host || 'localhost';
-    const proto = host.includes('localhost') ? 'http' : 'https';
-    // Use their app's client_id - they registered the redirect URL there
+    const proto = host.includes('railway') ? 'https' : 'http';
     const clientId = process.env.TWITCH_CLIENT_ID!;
     const redirectUri = `${proto}://${host}/auth/callback`;
     const scope = 'user:edit:follows';
-    const url = `https://id.twitch.tv/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=follow_${botIdx}&force_verify=true`;
+    const url = `https://id.twitch.tv/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scope)}&state=${botIdx}&force_verify=true`;
+    logger.info(`Follow auth redirect for bot[${botIdx}]: ${redirectUri}`);
     res.redirect(url);
   });
 
-  // Single callback endpoint (handles all OAuth redirects)
   app.get('/auth/callback', (_req, res) => {
     res.send(`<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Auth</title>
 <style>body{background:#0e0e10;color:#efeff1;font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:16px;margin:0;text-align:center}.ok{color:#00c853;font-size:22px}.err{color:#e53935;font-size:18px}p{opacity:.6;font-size:14px}</style></head><body>
@@ -122,8 +122,8 @@ const p=new URLSearchParams(window.location.hash.substring(1));
 const t=p.get('access_token'),s=p.get('state')||'0';
 const m=document.getElementById('msg');
 if(t){
-  const isFollow=s.startsWith('follow_');
-  const botIdx=parseInt(s.replace('follow_',''));
+  const isFollow=true;
+  const botIdx=parseInt(s);
   fetch('/auth/save',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({token:t,botIndex:botIdx,type:isFollow?'follow':'general'})})
   .then(r=>r.json()).then(d=>{

@@ -170,68 +170,52 @@ async function main() {
     };
   });
 
-  // Transcription → update shared context, one random bot MIGHT reply
+  // Transcription → update context, ALL eligible bots independently decide to react
   aiService.on('transcription', (text: string) => {
     lastTranscription = text;
     lastTranscriptionTime = Date.now();
   });
 
-  // AI generated message → route to ONE random connected bot
-  aiService.on('message', (message: string) => {
-    if (!message?.trim()) return;
+  // AI generated message from transcription → each bot independently generates its own response
+  aiService.on('message', async (_rawMessage: string) => {
+    // _rawMessage is the transcription result — each bot generates its OWN message
     const connected = bots.filter(b => b.isBotConnected());
     if (!connected.length) return;
 
-    // Pick a random connected bot that hasn't sent recently
-    const eligible = connected.filter(b => {
-      const p = PERSONALITIES[b.getBotIndex() % PERSONALITIES.length];
-      return canSend(b.getBotIndex(), p.minInterval);
-    });
-    if (!eligible.length) return;
+    // Each bot independently decides to respond based on its rate limit
+    for (const bot of connected) {
+      const idx = bot.getBotIndex();
+      const personality = PERSONALITIES[idx % PERSONALITIES.length];
+      if (!canSend(idx, personality.minInterval)) continue;
 
-    const bot = eligible[Math.floor(Math.random() * eligible.length)];
-    const idx = bot.getBotIndex();
-    const memory = botMemories[idx];
-
-    if (memory.isDuplicate(message)) return;
-
-    markSent(idx);
-    memory.addSent(message);
-    bot.sendAIMessage(message);
-    logger.info(`AI → bot[${idx}] ${bot.getUsername()}: "${message}"`);
-    io.emit('bot-sent', { message, botIndex: idx, botName: bot.getUsername(), manual: false, time: Date.now() });
+      // Stagger so they don't all send at exactly the same time
+      const delay = Math.random() * 20000; // up to 20s stagger
+      setTimeout(() => {
+        if (!isShuttingDown) tryGenerate(bot, botMemories[idx], 'transcription');
+      }, delay);
+    }
   });
 
-  // Incoming chat → update context, maybe ONE bot replies
+  // Incoming chat → update context, at most ONE bot replies per message
   aiService.on('incomingChat', (data: any) => {
     io.emit('incoming-chat', data);
 
-    // Add to recent chat
     recentChat.push({ username: data.username, message: data.message, time: Date.now() });
     if (recentChat.length > 15) recentChat.shift();
-
-    // Remember viewers
     botMemories.forEach(m => m.addViewer(data.username));
 
-    // Only ONE bot replies to chat (prevents spam)
-    // Pick bot by probability, only one wins
-    const connected = bots.filter(b => b.isBotConnected());
-    if (!connected.length) return;
+    // Pick at most ONE bot to reply (weighted random, only if rate allows)
+    const eligible = bots.filter(b => {
+      if (!b.isBotConnected()) return false;
+      const p = PERSONALITIES[b.getBotIndex() % PERSONALITIES.length];
+      return canSend(b.getBotIndex(), p.minInterval) && Math.random() < p.chatReplyChance;
+    });
 
-    const personality = PERSONALITIES;
-    const rolls = connected.map(b => ({
-      bot: b,
-      roll: Math.random() * personality[b.getBotIndex() % personality.length].chatReplyChance
-    }));
-    const winner = rolls.reduce((best, cur) => cur.roll > best.roll ? cur : best, rolls[0]);
-
-    if (winner.roll > 0.1) { // at least some probability needed
-      const delay = Math.random() * 12000 + 3000; // 3-15s delay
+    if (eligible.length > 0) {
+      const bot = eligible[Math.floor(Math.random() * eligible.length)];
+      const delay = Math.random() * 10000 + 2000; // 2-12s delay
       setTimeout(() => {
-        if (!isShuttingDown) {
-          const replyTo = data.isStreamer ? undefined : undefined; // only @tag if making sense
-          tryGenerate(winner.bot, botMemories[winner.bot.getBotIndex()], 'chat');
-        }
+        if (!isShuttingDown) tryGenerate(bot, botMemories[bot.getBotIndex()], 'chat');
       }, delay);
     }
   });

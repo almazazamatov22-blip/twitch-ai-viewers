@@ -382,56 +382,97 @@ export class AIService extends EventEmitter {
 
   public async generateMessage(context?: string, botPersonality?: string): Promise<string> {
     try {
-      // Allow generation even without channel info (use chat context)
-
       let parsedContext: any = {};
-      try { if (context) parsedContext = JSON.parse(context); }
-      catch (_) { parsedContext = { rawText: context }; }
+      try { if (context) parsedContext = JSON.parse(context); } catch (_) {}
 
-      if (!parsedContext.lastTranscription && !parsedContext.chatMessage) return '';
-      if (parsedContext.lastTranscription && parsedContext.lastTranscription.length < 5) return '';
+      const transcription = (parsedContext.lastTranscription || '').trim();
+      const chatMsg = (parsedContext.chatMessage || '').trim();
+      const botMemory = (parsedContext.botMemory || '').trim();
+      const replyTo = (parsedContext.replyTo || '').trim();
+
+      // Need meaningful context
+      if (!transcription && !chatMsg) return '';
+      if (transcription.length < 15 && !chatMsg) return '';
 
       const lang = process.env.ORIGINAL_STREAM_LANGUAGE || 'ru';
-      const channelInfo = this.currentChannelInfo;
+      const info = this.currentChannelInfo;
 
-      const systemPrompt = botPersonality || `Ты реальный зритель стрима на Twitch. Пиши как человек в чате — коротко, без знаков препинания, строчными буквами. Можно материться. Разговорный стиль.`;
+      // Build rich stream context
+      const streamContext = [
+        info?.title ? `Название стрима: "${info.title}"` : '',
+        info?.gameName && info.gameName !== 'Not specified' ? `Категория: ${info.gameName}` : '',
+        info?.viewerCount ? `Зрителей: ${info.viewerCount}` : '',
+      ].filter(Boolean).join('
+');
 
-      const streamCtx = channelInfo 
-        ? `Стрим: ${channelInfo.title} | Игра: ${channelInfo.gameName}` 
-        : 'Twitch стрим';
+      const systemPrompt = botPersonality || `Ты реальный зритель Twitch стрима. Пиши коротко и по делу.`;
 
-      const prompt = `${streamCtx} | Язык: ${lang}
-${parsedContext.lastTranscription ? `Стример сказал: "${parsedContext.lastTranscription}"` : ''}
-${parsedContext.chatMessage ? `В чате: "${parsedContext.chatMessage}"` : ''}
-${parsedContext.botMemory ? parsedContext.botMemory : ''}
+      const userPrompt = `
+${streamContext}
 
-Напиши ОДНО сообщение в чат (до 50 символов). Только само сообщение, без кавычек и пояснений. Язык: ${lang}.`;
+${transcription ? `Стример только что говорил:
+"${transcription.slice(0, 400)}"` : ''}
+
+${chatMsg ? `Недавние сообщения в чате:
+${chatMsg}` : ''}
+
+${replyTo ? `Тебе написали (можешь ответить с @тегом): "${replyTo}"` : ''}
+
+${botMemory ? `Контекст:
+${botMemory}` : ''}
+
+ЗАДАЧА: Напиши ОДНО короткое сообщение в чат Twitch (максимум 60 символов).
+
+ПРАВИЛА:
+- Пиши только если есть что-то КОНКРЕТНОЕ сказать по теме стрима
+- Реагируй на то что стример СКАЗАЛ — упомяни конкретный момент из его речи
+- НЕ пиши общие фразы ("давай", "зачёт", "понятно", "ладно")
+- НЕ пиши что не понимаешь
+- Пиши строчными без точки в конце
+- Язык: ${lang}
+- Если нечего сказать по теме — верни пустую строку
+
+Ответ: только само сообщение или пустая строка. Без кавычек.`.trim();
 
       if (!this.groq) return '';
 
-      logger.info('Generating message for context:', parsedContext.lastTranscription?.slice(0, 50) || parsedContext.chatMessage?.slice(0, 50));
+      logger.info('Generating for:', transcription.slice(0, 60) || chatMsg.slice(0, 60));
 
       const response = await this.groq.chat.completions.create({
-        model: "llama-3.3-70b-versatile",
+        model: 'llama-3.3-70b-versatile',
         messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: prompt }
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt }
         ],
-        max_tokens: 60,
-        temperature: 0.9
+        max_tokens: 50,
+        temperature: 0.85,
       });
 
-      const raw = response.choices[0].message?.content?.trim() || '';
+      const raw = (response.choices[0].message?.content || '').trim();
       logger.info('Raw generated:', raw);
 
-      const msg = raw
-        .replace(/^["'«»]|["'«»]$/g, '')
-        .replace(/[.!?]+$/, '')
-        .trim()
-        .slice(0, 70);
+      // Reject useless outputs
+      const uselessPatterns = [
+        /^(давай|зачёт|понятно|ладно|хорошо|окей|ок|да|нет|хм|ммм|эм)$/i,
+        /^(не понимаю|не понял|что происходит|бля что|хуй знает)$/i,
+        /пустая строка/i,
+        /^$/,
+      ];
 
-      logger.info('Final message:', msg);
-      return msg;
+      const cleaned = raw
+        .replace(/^["'«»]|["'«»]$/g, '')
+        .replace(/\.$/, '')
+        .trim();
+
+      if (!cleaned || cleaned.length < 3) return '';
+      if (uselessPatterns.some(p => p.test(cleaned))) {
+        logger.info('Rejected useless output:', cleaned);
+        return '';
+      }
+
+      logger.info('Final message:', cleaned);
+      return cleaned.slice(0, 70);
+
     } catch (error) {
       logger.error('Error generating message:', error);
       return '';

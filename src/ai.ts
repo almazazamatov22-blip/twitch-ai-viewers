@@ -402,8 +402,7 @@ export class AIService extends EventEmitter {
         info?.title ? `Название стрима: "${info.title}"` : '',
         info?.gameName && info.gameName !== 'Not specified' ? `Категория: ${info.gameName}` : '',
         info?.viewerCount ? `Зрителей: ${info.viewerCount}` : '',
-      ].filter(Boolean).join('
-');
+      ].filter(Boolean).join('\n');
 
       const systemPrompt = botPersonality || `Ты реальный зритель Twitch стрима. Пиши коротко и по делу.`;
 

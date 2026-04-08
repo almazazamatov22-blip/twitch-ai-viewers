@@ -1,21 +1,22 @@
 import Groq from 'groq-sdk';
 
+// Each bot index gets a fixed personality
 const PERSONAS = [
-  { style: 'enthusiastic hype fan',   traits: 'Very excited, short reactions, PogChamp/LUL, hyped every play' },
-  { style: 'chill lurker',            traits: 'Relaxed, brief comments, uses "lol" "lmao", casual tone' },
-  { style: 'strategic advisor',       traits: 'Gives tactical tips, game knowledge, constructive' },
-  { style: 'friendly comedian',       traits: 'Makes jokes, puns, light-hearted, never mean' },
-  { style: 'curious newbie',          traits: 'Asks questions, gets amazed easily, learning' },
-  { style: 'nostalgic veteran',       traits: 'Compares to old games, experienced, brief insights' },
-  { style: 'hype train conductor',    traits: 'CAPS sometimes, rallies chat, LET\'S GO energy' },
-  { style: 'calm analyst',            traits: 'Measured observations, concise, precise' },
+  { name: 'hype_fan',     sys: 'You are an excited Twitch viewer. Short hyped reactions. PogChamp energy. 2-10 words.' },
+  { name: 'chill',        sys: 'You are a chill Twitch viewer. Brief casual comments. Use lol/lmao sometimes. 2-12 words.' },
+  { name: 'gamer',        sys: 'You are an experienced gamer watching Twitch. Give short game tips or observations. 3-15 words.' },
+  { name: 'comedian',     sys: 'You are a funny Twitch viewer. Light jokes and puns. Never mean. 2-12 words.' },
+  { name: 'newbie',       sys: 'You are a curious new viewer. Ask short questions or react with amazement. 2-12 words.' },
+  { name: 'analyst',      sys: 'You are a thoughtful Twitch viewer. Brief strategic observations. 3-15 words.' },
+  { name: 'hype_train',   sys: 'You are a hype train Twitch viewer. Rally the chat. Energetic short messages. 2-10 words.' },
+  { name: 'veteran',      sys: 'You are a veteran gamer watching Twitch. Nostalgic short comments. 2-12 words.' },
 ];
 
-interface HistoryMsg { role: 'user' | 'assistant'; content: string; }
+interface Msg { role: 'user' | 'assistant'; content: string; }
 
 export class AIService {
   private groq: Groq;
-  private histories = new Map<string, HistoryMsg[]>();
+  private histories = new Map<string, Msg[]>();
   private recentChat: string[] = [];
   private settings: Record<string, boolean>;
 
@@ -26,54 +27,52 @@ export class AIService {
 
   addChatContext(line: string): void {
     this.recentChat.push(line);
-    if (this.recentChat.length > 10) this.recentChat.shift();
+    if (this.recentChat.length > 8) this.recentChat.shift();
   }
 
   async generateMessage(username: string, context: string, language: string, botIndex = 0): Promise<string> {
     const persona = PERSONAS[botIndex % PERSONAS.length];
-    const langName = language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English';
-    const emojiLine = this.settings.useEmoji
-      ? 'Occasionally use Twitch emotes: LUL Pog KEKW monkaS or simple emojis.'
-      : 'Do not use emojis.';
-    const ctxLine = this.settings.chatContext && this.recentChat.length
-      ? '\nRecent chat:\n' + this.recentChat.slice(-4).join('\n') : '';
+    const lang = language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English';
+    const emoji = this.settings.useEmoji
+      ? 'Occasionally use Twitch emotes: LUL Pog KEKW monkaS or emojis.' : 'No emojis.';
+    const ctx = this.recentChat.length && this.settings.chatContext
+      ? '\nChat context: ' + this.recentChat.slice(-3).join(' | ') : '';
 
-    const system = [
-      'You are "' + username + '", a Twitch viewer with a specific personality.',
-      'Personality: ' + persona.style + '. Traits: ' + persona.traits + '.',
-      'ALWAYS write in ' + langName + ' only.',
-      'Message MUST be 2-15 words. Be human, varied, never repeat yourself.',
-      emojiLine,
-      'Stream context: ' + (context || 'gaming stream') + '.' + ctxLine,
-      'Output ONLY the chat message text. No quotes, no explanation, no username prefix.',
-    ].join('\n');
+    const system = persona.sys
+      + '\nALWAYS write in ' + lang + ' only.'
+      + '\n' + emoji
+      + '\nStream: ' + (context || 'gaming stream') + '.' + ctx
+      + '\nNEVER repeat previous messages. Output ONLY the chat text, nothing else.';
 
     const history = this.histories.get(username) || [];
 
     try {
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 40,
-        temperature: 0.95,
-        frequency_penalty: 1.2,
-        presence_penalty: 0.9,
+        max_tokens: 35,
+        temperature: 0.97,
+        frequency_penalty: 1.3,
+        presence_penalty: 1.0,
         messages: [
           { role: 'system', content: system },
-          ...history.slice(-6),
-          { role: 'user' as const, content: 'Post a chat message.' },
+          ...history.slice(-4),
+          { role: 'user' as const, content: 'Write one chat message now.' },
         ],
       });
 
-      const raw = (res.choices[0]?.message?.content || '').trim().replace(/^["'`]+|["'`]+$/g, '').trim();
-      if (!raw) return this.fallback(language);
+      const raw = (res.choices[0]?.message?.content || '').trim()
+        .replace(/^["'`]+|["'`]+$/g, '').trim();
 
-      const newHistory: HistoryMsg[] = [
+      if (!raw || raw.length < 2) return this.fallback(language);
+
+      const updated: Msg[] = [
         ...history,
-        { role: 'user' as const, content: 'Post a chat message.' },
+        { role: 'user' as const, content: 'Write one chat message now.' },
         { role: 'assistant' as const, content: raw },
-      ].slice(-8);
-      this.histories.set(username, newHistory);
+      ].slice(-6);
+      this.histories.set(username, updated);
 
+      console.log('[ai]', username, '(', persona.name, ') →', raw);
       return raw.slice(0, 200);
     } catch (e: any) {
       console.error('[ai] error for', username, ':', e.message);
@@ -83,9 +82,9 @@ export class AIService {
 
   private fallback(lang: string): string {
     const f: Record<string, string[]> = {
-      ru: ['gg', 'лол', 'давай!', 'ого', 'красавчик', 'нис', 'хорошо', 'пог', 'алё'],
-      en: ['gg', 'lol', 'nice!', 'Pog', 'let\'s go', 'GG', 'hype', 'yoo'],
-      kk: ['жарайсың', 'gg', 'алға!', 'нис'],
+      ru: ['gg', 'лол', 'давай!', 'ого', 'красавчик', 'нис', 'пог', 'это было круто'],
+      en: ['gg', 'lol', 'nice', 'Pog', 'let\'s go', 'GG', 'hype', 'yoo'],
+      kk: ['жарайсың', 'gg', 'алға', 'нис'],
     };
     const arr = f[lang] || f.en;
     return arr[Math.floor(Math.random() * arr.length)];

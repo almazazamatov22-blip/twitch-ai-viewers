@@ -1,11 +1,13 @@
 import * as tmi from 'tmi.js';
 import { AIService } from './ai';
+import axios from 'axios';
 
 interface BotConfig { username: string; token: string; }
 
 interface BotInstance {
   client: tmi.Client;
   username: string;
+  token: string;          // raw token without oauth: prefix
   connected: boolean;
   timer?: NodeJS.Timeout;
   messages: number;
@@ -23,7 +25,6 @@ export class BotManager {
   private language: string;
   private emit: EmitFn;
   private stopped = false;
-  // Shared reader client — reads ALL real chat messages
   private readerClient: tmi.Client | null = null;
 
   constructor(
@@ -34,7 +35,7 @@ export class BotManager {
     emit: EmitFn
   ) {
     this.channel = channel.toLowerCase().replace(/^#/, '');
-    this.intervalMs = Math.max(15, opts.interval) * 1000;
+    this.intervalMs = Math.max(20, opts.interval) * 1000;
     this.context = opts.context;
     this.language = opts.language;
     this.emit = emit;
@@ -44,56 +45,50 @@ export class BotManager {
     this.initReader();
   }
 
-  // Anonymous reader to get ALL real Twitch chat messages
   private initReader(): void {
     this.readerClient = new tmi.Client({
       options: { debug: false, skipMembership: true },
       channels: ['#' + this.channel],
       connection: { reconnect: true, secure: true },
     });
-
     this.readerClient.on('message', (
-      _ch: string,
-      tags: tmi.CommonUserstate,
-      message: string,
-      _self: boolean
+      _ch: string, tags: tmi.CommonUserstate, message: string, _self: boolean
     ) => {
-      const username = tags.username || tags['display-name'] || 'user';
+      const username = (tags.username || '').toLowerCase();
       const isBotAccount = this.bots.has(username);
-
-      // Send ALL messages (including bot messages) to frontend for real chat display
       this.emit('chat:message', {
-        username,
+        username: tags.username || '',
+        displayName: tags['display-name'] || tags.username || '',
         message,
         color: tags.color || null,
         isBot: isBotAccount,
-        id: tags.id || Date.now().toString(),
-        displayName: tags['display-name'] || username,
+        id: tags.id || String(Date.now()),
       });
-
-      // Feed only real user messages to AI context (not our bots)
       if (!isBotAccount) {
-        this.ai.addChatContext(username + ': ' + message);
+        this.ai.addChatContext((tags['display-name'] || tags.username || 'user') + ': ' + message);
       }
     });
-
-    this.readerClient.connect().catch(e => {
-      console.error('[reader] connect error:', e.message);
-    });
+    this.readerClient.connect().catch((e: Error) =>
+      console.error('[reader] connect error:', e.message)
+    );
   }
 
   private initBot(cfg: BotConfig, idx: number): void {
-    const token = cfg.token.startsWith('oauth:') ? cfg.token : 'oauth:' + cfg.token;
+    const token = cfg.token.replace(/^oauth:/i, '');
+    const oauthToken = 'oauth:' + token;
 
     const client = new tmi.Client({
       options: { debug: false, skipMembership: true },
-      identity: { username: cfg.username, password: token },
+      identity: { username: cfg.username, password: oauthToken },
       channels: ['#' + this.channel],
       connection: { reconnect: true, maxReconnectAttempts: 20, reconnectInterval: 3000, secure: true },
     });
 
-    const bot: BotInstance = { client, username: cfg.username, connected: false, messages: 0, index: idx };
-    this.bots.set(cfg.username, bot);
+    const bot: BotInstance = {
+      client, username: cfg.username, token,
+      connected: false, messages: 0, index: idx,
+    };
+    this.bots.set(cfg.username.toLowerCase(), bot);
 
     client.on('connected', () => {
       bot.connected = true;
@@ -104,11 +99,11 @@ export class BotManager {
       if (!this.stopped)
         this.emit('bot:status', { username: cfg.username, state: 'reconnecting', message: reason || 'disconnected' });
     });
-    client.on('reconnect', () => {
-      this.emit('bot:status', { username: cfg.username, state: 'connecting', message: 'Переподключение...' });
-    });
+    client.on('reconnect', () =>
+      this.emit('bot:status', { username: cfg.username, state: 'connecting', message: 'Переподключение...' })
+    );
     client.on('notice', (_ch: string, msgid: string, message: string) => {
-      console.warn('[notice] ' + cfg.username + ': ' + msgid + ' — ' + message);
+      console.warn('[notice]', cfg.username, msgid, message);
       this.emit('bot:error', { username: cfg.username, code: msgid, message });
     });
 
@@ -127,8 +122,8 @@ export class BotManager {
     this.stopped = false;
     const bots = Array.from(this.bots.values());
     bots.forEach((bot, idx) => {
-      // Space first messages: wait for connections + stagger
-      const offset = 10000 + Math.floor((this.intervalMs / bots.length) * idx);
+      // First message: wait for connection + stagger evenly
+      const offset = 10000 + Math.floor((this.intervalMs / Math.max(bots.length, 1)) * idx);
       bot.timer = setTimeout(() => this.scheduleBot(bot), offset);
     });
   }
@@ -149,12 +144,12 @@ export class BotManager {
     try {
       const msg = await this.ai.generateMessage(bot.username, this.context, this.language, bot.index);
       if (!msg || msg.length < 2) return;
-      console.log('[bot] ' + bot.username + ' → "' + msg + '"');
+      console.log('[bot]', bot.username, '→', msg);
       await bot.client.say('#' + this.channel, msg);
       bot.messages++;
       this.emit('bot:message', { username: bot.username, message: msg, count: bot.messages });
     } catch (e: any) {
-      const m = e?.message || String(e);
+      const m = String(e?.message || e);
       console.error('[bot] say error', bot.username, m);
       if (!m.includes('Not connected') && !m.includes('No response'))
         this.emit('bot:error', { username: bot.username, code: 'say_error', message: m });
@@ -163,43 +158,51 @@ export class BotManager {
 
   async sendManual(usernames: string[], message: string): Promise<void> {
     for (const u of usernames) {
-      const bot = this.bots.get(u);
+      const bot = this.bots.get(u.toLowerCase()) || this.bots.get(u);
       if (!bot?.connected) continue;
       try {
         await bot.client.say('#' + this.channel, message);
         bot.messages++;
-        this.emit('bot:message', { username: u, message, count: bot.messages });
+        this.emit('bot:message', { username: bot.username, message, count: bot.messages });
       } catch (e: any) {
-        console.error('[bot] manual error', u, e.message);
-        this.emit('bot:error', { username: u, code: 'say_error', message: e.message });
+        this.emit('bot:error', { username: bot.username, code: 'say_error', message: e.message });
       }
     }
   }
 
-  async followChannel(channelId: string, clientId: string): Promise<{ username: string; ok: boolean; error?: string }[]> {
+  // Follow using token validation to get the correct client_id
+  async followChannel(channelId: string): Promise<{ username: string; ok: boolean; error?: string }[]> {
     const results: { username: string; ok: boolean; error?: string }[] = [];
-    const axios = (await import('axios')).default;
 
-    for (const [username, bot] of this.bots) {
-      const rawToken = ((bot.client as any).opts?.identity?.password as string) || '';
-      const token = rawToken.replace(/^oauth:/, '');
+    for (const [, bot] of this.bots) {
       try {
-        const meRes = await axios.get('https://api.twitch.tv/helix/users', {
-          headers: { Authorization: 'Bearer ' + token, 'Client-ID': clientId },
+        // Step 1: validate token → get the real client_id that issued this token
+        const valRes = await axios.get('https://id.twitch.tv/oauth2/validate', {
+          headers: { Authorization: 'OAuth ' + bot.token },
         });
-        const userId = meRes.data.data?.[0]?.id;
-        if (!userId) throw new Error('Cannot get user id for ' + username);
+        const tokenClientId = valRes.data.client_id as string;
+        const userId = valRes.data.user_id as string;
 
+        if (!userId) throw new Error('Token не содержит user_id (возможно app token)');
+
+        // Step 2: follow using the token's own client_id
         await axios.post(
           'https://api.twitch.tv/helix/channels/follow',
           { broadcaster_id: channelId, user_id: userId },
-          { headers: { Authorization: 'Bearer ' + token, 'Client-ID': clientId, 'Content-Type': 'application/json' } }
+          {
+            headers: {
+              Authorization: 'Bearer ' + bot.token,
+              'Client-ID': tokenClientId,
+              'Content-Type': 'application/json',
+            },
+          }
         );
-        results.push({ username, ok: true });
+        console.log('[follow]', bot.username, 'OK');
+        results.push({ username: bot.username, ok: true });
       } catch (e: any) {
         const err = e.response?.data?.message || e.message;
-        console.warn('[follow]', username, err);
-        results.push({ username, ok: false, error: err });
+        console.warn('[follow]', bot.username, err);
+        results.push({ username: bot.username, ok: false, error: err });
       }
     }
     return results;
@@ -213,5 +216,7 @@ export class BotManager {
     this.bots.clear();
   }
 
-  getUsernames(): string[] { return Array.from(this.bots.keys()); }
+  getUsernames(): string[] {
+    return Array.from(this.bots.values()).map(b => b.username);
+  }
 }

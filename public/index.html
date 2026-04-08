@@ -3,169 +3,183 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TwitchBoost — AI Chat Panel</title>
+<title>TwitchBoost</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <script src="/socket.io/socket.io.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  --bg:#111114;--surf:#18181c;--card:#1e1e24;--b1:#2a2a32;--b2:#333340;
-  --pu:#7c3aed;--pl:#9d5cf6;--pdim:rgba(124,58,237,.15);
+  --bg:#111114;--sf:#18181c;--ca:#1e1e24;--b1:#2a2a32;--b2:#333340;
+  --pu:#7c3aed;--pl:#9d5cf6;--pd:rgba(124,58,237,.15);
   --tx:#e8e8f0;--tx2:#9898b0;--tx3:#55556a;
   --gr:#22c55e;--rd:#ef4444;--yw:#f59e0b;--cy:#06b6d4;
 }
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:100vh;display:flex;flex-direction:column;overflow:hidden;font-size:13px}
 
 /* NAV */
-.nav{height:44px;background:var(--surf);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 14px;flex-shrink:0;justify-content:space-between}
-.logo{display:flex;align-items:center;gap:7px;font-weight:700;font-size:14px;margin-right:16px}
+.nav{height:44px;background:var(--sf);border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 12px;flex-shrink:0;justify-content:space-between;gap:8px}
+.logo{display:flex;align-items:center;gap:6px;font-weight:700;font-size:14px;margin-right:14px;flex-shrink:0}
 .logo-i{width:26px;height:26px;background:linear-gradient(135deg,var(--pu),#ec4899);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:13px}
-.tabs{display:flex;gap:2px}
-.tab{padding:5px 13px;border-radius:6px;cursor:pointer;color:var(--tx2);font-weight:500;transition:all .15s;border:none;background:transparent;font-size:13px;font-family:inherit}
-.tab.on{background:var(--pdim);color:var(--pl)}
+.tabs{display:flex;gap:2px;flex-shrink:0}
+.tab{padding:5px 12px;border-radius:6px;cursor:pointer;color:var(--tx2);font-weight:500;transition:all .15s;border:none;background:transparent;font-size:13px;font-family:inherit}
+.tab.on{background:var(--pd);color:var(--pl)}
 .tab:hover:not(.on){color:var(--tx);background:rgba(255,255,255,.04)}
-.nav-r{display:flex;align-items:center;gap:8px;flex-shrink:0}
-.chip{font-size:12px;color:var(--tx3);display:flex;align-items:center;gap:4px}
+.nav-r{display:flex;align-items:center;gap:6px;overflow:hidden;flex-wrap:nowrap}
+.chip{font-size:11px;color:var(--tx3);display:flex;align-items:center;gap:4px;white-space:nowrap}
 .chip b{color:var(--tx2)}
-.sep{color:var(--b2)}
-.badge{background:var(--pdim);color:var(--pl);border:1px solid rgba(124,58,237,.3);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.sep{color:var(--b2);font-size:11px}
+.badge{background:var(--pd);color:var(--pl);border:1px solid rgba(124,58,237,.3);padding:1px 7px;border-radius:20px;font-size:11px;font-weight:600}
 .sdot{width:7px;height:7px;border-radius:50%;background:var(--tx3);display:inline-block;flex-shrink:0}
-.sdot.on{background:var(--gr);box-shadow:0 0 6px var(--gr);animation:blink 2s infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.5}}
-.nav-btn{display:flex;align-items:center;gap:5px;padding:5px 9px;border:1px solid var(--b2);border-radius:6px;background:transparent;color:var(--tx2);cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s;white-space:nowrap}
-.nav-btn:hover{border-color:var(--pu);color:var(--pl)}
-.nav-btn.follow{background:var(--pdim);border-color:var(--pu);color:var(--pl)}
-.nav-btn.follow:hover{background:var(--pu);color:#fff}
+.sdot.on{background:var(--gr);box-shadow:0 0 5px var(--gr);animation:bl 2s infinite}
+@keyframes bl{0%,100%{opacity:1}50%{opacity:.4}}
+.nb{display:flex;align-items:center;gap:4px;padding:4px 9px;border:1px solid var(--b2);border-radius:6px;background:transparent;color:var(--tx2);cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s;white-space:nowrap;text-decoration:none}
+.nb:hover{border-color:var(--pu);color:var(--pl)}
+.nb.fl{background:var(--pd);border-color:var(--pu);color:var(--pl)}
+.nb.fl:hover{background:var(--pu);color:#fff}
 
 /* LAYOUT */
 .layout{flex:1;display:grid;grid-template-columns:310px 1fr 275px;overflow:hidden;min-height:0}
 
-/* LEFT CHAT */
-.pl{background:var(--surf);border-right:1px solid var(--b1);display:flex;flex-direction:column;overflow:hidden}
-.ph{padding:8px 12px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.ph-t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--tx3)}
-.btn-xs{background:none;border:none;color:var(--tx3);cursor:pointer;font-size:11px;font-family:inherit;padding:2px 6px;border-radius:4px;transition:all .15s}
-.btn-xs:hover{color:var(--tx2);background:rgba(255,255,255,.05)}
+/* ── LEFT: REAL TWITCH CHAT ── */
+.pl{background:var(--sf);border-right:1px solid var(--b1);display:flex;flex-direction:column;overflow:hidden}
+.phead{padding:8px 12px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.phead-t{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--tx3)}
+.hbtns{display:flex;gap:3px}
+.xbtn{background:none;border:none;color:var(--tx3);cursor:pointer;font-size:11px;font-family:inherit;padding:2px 5px;border-radius:4px}
+.xbtn:hover{color:var(--tx2);background:rgba(255,255,255,.05)}
 
-.chat-feed{flex:1;overflow-y:auto;padding:4px 0;min-height:0}
-.chat-feed::-webkit-scrollbar{width:3px}
-.chat-feed::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
-.cm{padding:3px 12px;display:flex;gap:6px;align-items:flex-start}
-.cm:hover{background:rgba(255,255,255,.02)}
-.cav{width:20px;height:20px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;margin-top:2px}
-.cn{font-size:12px;font-weight:600;margin-right:3px}
-.ct{color:var(--tx2);font-size:12px;line-height:1.45;word-break:break-word}
-.cm.sys .ct{color:var(--tx3);font-size:11px;font-style:italic}
-.cm.err .ct{color:var(--rd);font-size:11px}
-.cm.err .cn{color:var(--rd)}
-.cempty{text-align:center;padding:40px 16px;color:var(--tx3);font-size:12px}
+/* Reply bar */
+.reply-bar{background:rgba(124,58,237,.1);border-top:1px solid rgba(124,58,237,.2);padding:5px 10px;display:none;align-items:center;justify-content:space-between;flex-shrink:0;font-size:11px;gap:8px}
+.reply-bar.show{display:flex}
+.reply-info{color:var(--pl);display:flex;align-items:center;gap:5px;flex:1;min-width:0;overflow:hidden}
+.reply-text{color:var(--tx3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.reply-close{background:none;border:none;color:var(--tx3);cursor:pointer;font-size:14px;padding:0 2px}
 
-/* ERROR PANEL toggle */
-.err-toggle{padding:4px 12px;border-top:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;cursor:pointer;background:rgba(239,68,68,.04)}
-.err-toggle:hover{background:rgba(239,68,68,.08)}
-.err-count{font-size:11px;color:var(--rd);display:flex;align-items:center;gap:5px}
-.err-panel{background:rgba(239,68,68,.04);border-top:1px solid rgba(239,68,68,.1);max-height:100px;overflow-y:auto;flex-shrink:0;display:none}
-.err-panel.open{display:block}
-.err-item{padding:4px 12px;font-size:11px;color:var(--rd);border-bottom:1px solid rgba(239,68,68,.06);font-family:monospace}
+.feed{flex:1;overflow-y:auto;padding:3px 0;min-height:0}
+.feed::-webkit-scrollbar{width:3px}
+.feed::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
 
-/* BOTTOM INPUT */
+/* Chat messages */
+.cm{padding:3px 10px;display:flex;gap:7px;align-items:flex-start;position:relative;cursor:default}
+.cm:hover{background:rgba(255,255,255,.025)}
+.cm:hover .cm-actions{display:flex}
+.cm-av{width:20px;height:20px;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#fff;margin-top:2px}
+.cm-body{flex:1;min-width:0}
+.cm-name{font-size:12px;font-weight:600;margin-right:3px;cursor:pointer}
+.cm-name:hover{text-decoration:underline}
+.cm-text{color:var(--tx2);font-size:12px;line-height:1.45;word-break:break-word}
+.cm.sys .cm-text{color:var(--tx3);font-size:11px;font-style:italic}
+.cm.bot-msg .cm-text{color:#c4b5fd}
+.cm-actions{display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);gap:3px;background:var(--ca);border:1px solid var(--b2);border-radius:6px;padding:2px 4px}
+.ca-btn{background:none;border:none;color:var(--tx3);cursor:pointer;font-size:12px;padding:2px 4px;border-radius:4px;transition:all .15s}
+.ca-btn:hover{color:var(--tx);background:rgba(255,255,255,.08)}
+.cempty{text-align:center;padding:40px 12px;color:var(--tx3);font-size:12px}
+
+/* Error strip */
+.err-strip{padding:4px 12px;border-top:1px solid var(--b1);cursor:pointer;display:none;background:rgba(239,68,68,.05);flex-shrink:0}
+.err-strip:hover{background:rgba(239,68,68,.09)}
+.err-label{font-size:11px;color:var(--rd);display:flex;align-items:center;justify-content:space-between}
+.err-list{max-height:80px;overflow-y:auto;margin-top:4px;display:none}
+.err-list.open{display:block}
+.err-it{font-size:10px;color:var(--rd);padding:2px 0;border-bottom:1px solid rgba(239,68,68,.08);font-family:monospace}
+
+/* INPUT */
 .iz{flex-shrink:0}
 .pbar{padding:6px 10px 4px;border-top:1px solid var(--b1);display:flex;flex-wrap:wrap;gap:4px}
-.pb{padding:3px 9px;background:var(--card);border:1px solid var(--b2);border-radius:20px;color:var(--tx2);cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s;white-space:nowrap}
-.pb:hover{border-color:var(--pu);color:var(--pl);background:var(--pdim)}
+.pb{padding:3px 9px;background:var(--ca);border:1px solid var(--b2);border-radius:20px;color:var(--tx2);cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s;white-space:nowrap}
+.pb:hover{border-color:var(--pu);color:var(--pl);background:var(--pd)}
 .padd{padding:3px 8px;background:transparent;border:1px dashed var(--b2);border-radius:20px;color:var(--tx3);cursor:pointer;font-size:11px;transition:all .15s}
 .padd:hover{border-color:var(--pu);color:var(--pl)}
-.cc-row{font-size:10px;color:var(--tx3);text-align:right;padding:2px 12px 1px;font-family:monospace}
+.cc-r{font-size:10px;color:var(--tx3);text-align:right;padding:2px 12px 1px;font-family:monospace}
 .ir{padding:6px 10px 10px;display:flex;gap:6px;align-items:flex-end}
-.mta{flex:1;background:var(--card);border:1px solid var(--b2);border-radius:8px;padding:7px 10px;color:var(--tx);font-family:inherit;font-size:13px;resize:none;outline:none;min-height:36px;max-height:80px;line-height:1.4;transition:border .15s}
+.mta{flex:1;background:var(--ca);border:1px solid var(--b2);border-radius:8px;padding:7px 10px;color:var(--tx);font-family:inherit;font-size:13px;resize:none;outline:none;min-height:36px;max-height:80px;line-height:1.4;transition:border .15s}
 .mta:focus{border-color:var(--pu)}
 .mta::placeholder{color:var(--tx3)}
 .sbtn{width:36px;height:36px;background:var(--pu);border:none;border-radius:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
 .sbtn:hover{background:var(--pl);transform:scale(1.05)}
 .sbtn svg{width:14px;height:14px;fill:#fff}
 
-/* CENTER */
+/* ── CENTER ── */
 .pc{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
-.stb{height:40px;border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 12px;gap:0;flex-shrink:0;background:var(--surf)}
+.stb{height:40px;border-bottom:1px solid var(--b1);display:flex;align-items:center;padding:0 12px;flex-shrink:0;background:var(--sf)}
 .si{font-size:12px;color:var(--tx3);padding:0 10px;border-right:1px solid var(--b1);height:100%;display:flex;align-items:center;gap:5px;white-space:nowrap}
 .si:last-child{border-right:none}
-.si b{color:var(--tx2);font-weight:500}
+.si b{color:var(--tx2)}
 .sf{flex:1;position:relative;background:#0a0a0c;min-height:0}
 .sf iframe{width:100%;height:100%;border:none;display:block}
 .sph{width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:var(--tx3)}
-.sph .icon{font-size:36px;opacity:.2}
-.ib{padding:7px 12px;border-top:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;background:var(--surf);flex-shrink:0}
+.sph-icon{font-size:36px;opacity:.2}
+.ib{padding:7px 12px;border-top:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;background:var(--sf);flex-shrink:0}
 .ibl{display:flex;align-items:center;gap:8px}
-.lpill{display:flex;align-items:center;gap:4px;background:rgba(239,68,68,.12);color:var(--rd);border:1px solid rgba(239,68,68,.2);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+.lpill{display:none;align-items:center;gap:4px;background:rgba(239,68,68,.12);color:var(--rd);border:1px solid rgba(239,68,68,.2);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
 .chn{font-weight:600;font-size:13px}
-.ibr{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--tx3)}
-.exbtn{padding:4px 10px;background:transparent;border:1px solid var(--b2);border-radius:5px;color:var(--tx3);cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s}
-.exbtn:hover{border-color:var(--b2);color:var(--tx2)}
+.ibr{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--tx3)}
+.exbtn{padding:3px 8px;background:transparent;border:1px solid var(--b2);border-radius:5px;color:var(--tx3);cursor:pointer;font-size:11px;font-family:inherit}
+.exbtn:hover{color:var(--tx2)}
 
-/* RIGHT ACCOUNTS */
-.pr{background:var(--surf);border-left:1px solid var(--b1);display:flex;flex-direction:column;overflow:hidden}
-.ah{padding:9px 12px;border-bottom:1px solid var(--b1);flex-shrink:0}
+/* ── RIGHT ── */
+.pr{background:var(--sf);border-left:1px solid var(--b1);display:flex;flex-direction:column;overflow:hidden}
+.ah{padding:9px 11px;border-bottom:1px solid var(--b1);flex-shrink:0}
 .albl{font-size:11px;color:var(--tx3);text-align:center;margin-bottom:7px}
-.atabs{display:flex;gap:3px;margin-bottom:8px}
-.at{flex:1;padding:5px 4px;border-radius:6px;cursor:pointer;color:var(--tx2);font-size:11px;font-weight:500;border:none;background:var(--card);font-family:inherit;transition:all .15s;text-align:center}
+.atabs{display:flex;gap:3px;margin-bottom:7px}
+.at{flex:1;padding:4px;border-radius:6px;cursor:pointer;color:var(--tx2);font-size:11px;font-weight:500;border:none;background:var(--ca);font-family:inherit;transition:all .15s;text-align:center}
 .at.on{background:var(--pu);color:#fff}
 .at:hover:not(.on){background:var(--b2);color:var(--tx)}
-.follow-row{display:flex;gap:6px}
-.follow-btn{flex:1;padding:6px;background:linear-gradient(135deg,var(--pu),#9333ea);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:5px}
-.follow-btn:hover{opacity:.85;transform:translateY(-1px)}
-.follow-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
-.twitch-link{flex:0 0 auto;padding:6px 8px;background:rgba(100,65,165,.15);border:1px solid rgba(100,65,165,.3);border-radius:6px;color:#9d5cf6;cursor:pointer;font-size:11px;font-family:inherit;text-decoration:none;display:flex;align-items:center;gap:4px;transition:all .15s}
-.twitch-link:hover{background:rgba(100,65,165,.25)}
-
-.asrch{display:flex;align-items:center;gap:5px;background:var(--card);border:1px solid var(--b1);border-radius:6px;padding:5px 8px;margin-top:2px}
+.flrow{display:flex;gap:5px;margin-bottom:5px}
+.fl-btn{flex:1;padding:6px;background:linear-gradient(135deg,var(--pu),#9333ea);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:4px}
+.fl-btn:hover{opacity:.85}
+.fl-btn:disabled{opacity:.4;cursor:not-allowed}
+.tw-a{flex:0 0 auto;padding:6px 8px;background:rgba(100,65,165,.12);border:1px solid rgba(100,65,165,.25);border-radius:6px;color:#9d5cf6;cursor:pointer;font-size:11px;font-family:inherit;text-decoration:none;display:flex;align-items:center;gap:3px}
+.tw-a:hover{background:rgba(100,65,165,.22)}
+.asrch{display:flex;align-items:center;gap:5px;background:var(--ca);border:1px solid var(--b1);border-radius:6px;padding:5px 8px}
 .asrch input{background:transparent;border:none;color:var(--tx);font-family:inherit;font-size:12px;outline:none;flex:1}
 .asrch input::placeholder{color:var(--tx3)}
-.al{flex:1;overflow-y:auto;padding:7px}
+.al{flex:1;overflow-y:auto;padding:6px}
 .al::-webkit-scrollbar{width:3px}
 .al::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
-.ai-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px;border:1px solid transparent;cursor:pointer;transition:all .15s;margin-bottom:3px;position:relative}
-.ai-item:hover{background:var(--card);border-color:var(--b1)}
-.ai-item.sel{background:var(--card);border-color:var(--pu)}
-.ai-item.sel::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--pu);border-radius:2px 0 0 2px}
+.ai-it{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;border:1px solid transparent;cursor:pointer;transition:all .15s;margin-bottom:3px;position:relative}
+.ai-it:hover{background:var(--ca);border-color:var(--b1)}
+.ai-it.sel{background:var(--ca);border-color:var(--pu)}
+.ai-it.sel::before{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--pu);border-radius:2px 0 0 2px}
 .ava{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;color:#fff;flex-shrink:0}
-.ai-info{flex:1;min-width:0}
+.ai-in{flex:1;min-width:0}
 .ai-n{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ai-s{font-size:10px;color:var(--tx3);margin-top:1px}
-.ai-r{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
+.ai-r{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
 .adot{width:7px;height:7px;border-radius:50%;background:var(--tx3)}
 .adot.on{background:var(--gr);box-shadow:0 0 5px var(--gr)}
 .adot.err{background:var(--rd)}
-.adot.cn{background:var(--yw);animation:blink 1s infinite}
+.adot.cn{background:var(--yw);animation:bl 1s infinite}
 .amsg{font-size:10px;color:var(--tx3);font-family:monospace}
-.af{padding:7px 12px;border-top:1px solid var(--b1);flex-shrink:0}
-.sab{width:100%;padding:6px;background:var(--card);border:1px solid var(--b2);border-radius:6px;color:var(--tx2);cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s}
+.af{padding:7px 11px;border-top:1px solid var(--b1);flex-shrink:0}
+.sab{width:100%;padding:6px;background:var(--ca);border:1px solid var(--b2);border-radius:6px;color:var(--tx2);cursor:pointer;font-size:11px;font-family:inherit;transition:all .15s}
 .sab:hover{border-color:var(--pu);color:var(--pl)}
 
 /* MODAL */
 .ov{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:200;display:none;align-items:center;justify-content:center}
 .ov.open{display:flex}
-.modal{background:var(--card);border:1px solid var(--b2);border-radius:11px;padding:20px;width:310px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-.mt{font-weight:700;margin-bottom:14px;font-size:14px}
-.mf{display:flex;flex-direction:column;gap:5px;margin-bottom:11px}
+.modal{background:var(--ca);border:1px solid var(--b2);border-radius:11px;padding:20px;width:305px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+.mt{font-weight:700;margin-bottom:13px;font-size:14px}
+.mf{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
 .mf label{font-size:11px;color:var(--tx3)}
-.mf input,.mf textarea{background:var(--surf);border:1px solid var(--b2);border-radius:7px;padding:7px 10px;color:var(--tx);font-family:inherit;font-size:13px;outline:none;transition:border .15s}
+.mf input,.mf textarea{background:var(--sf);border:1px solid var(--b2);border-radius:7px;padding:7px 10px;color:var(--tx);font-family:inherit;font-size:13px;outline:none}
 .mf input:focus,.mf textarea:focus{border-color:var(--pu)}
 .mf textarea{resize:vertical;min-height:65px}
 .mb{display:flex;gap:7px;justify-content:flex-end}
-.bc{padding:6px 13px;background:transparent;border:1px solid var(--b2);border-radius:6px;color:var(--tx2);cursor:pointer;font-family:inherit;font-size:12px}
-.bok{padding:6px 13px;background:var(--pu);border:none;border-radius:6px;color:#fff;cursor:pointer;font-family:inherit;font-size:12px}
+.bc{padding:6px 12px;background:transparent;border:1px solid var(--b2);border-radius:6px;color:var(--tx2);cursor:pointer;font-family:inherit;font-size:12px}
+.bok{padding:6px 12px;background:var(--pu);border:none;border-radius:6px;color:#fff;cursor:pointer;font-family:inherit;font-size:12px}
 
 /* TOASTS */
-.tw{position:fixed;bottom:18px;right:18px;z-index:300;display:flex;flex-direction:column;gap:5px}
-.toast{background:var(--card);border:1px solid var(--b2);border-radius:8px;padding:9px 13px;font-size:12px;display:flex;align-items:center;gap:7px;box-shadow:0 4px 20px rgba(0,0,0,.4);animation:ti .2s ease;max-width:300px}
-@keyframes ti{from{transform:translateX(60px);opacity:0}to{transform:none;opacity:1}}
+.tw{position:fixed;bottom:16px;right:16px;z-index:300;display:flex;flex-direction:column;gap:4px;pointer-events:none}
+.toast{background:var(--ca);border:1px solid var(--b2);border-radius:8px;padding:8px 12px;font-size:12px;display:flex;align-items:center;gap:6px;box-shadow:0 4px 20px rgba(0,0,0,.4);animation:ti .2s ease;max-width:290px;pointer-events:all}
+@keyframes ti{from{transform:translateX(50px);opacity:0}to{transform:none;opacity:1}}
 .toast.ok{border-left:3px solid var(--gr)}.toast.err{border-left:3px solid var(--rd)}.toast.info{border-left:3px solid var(--pl)}
 </style>
 </head>
 <body>
 
 <div class="nav">
-  <div style="display:flex;align-items:center">
+  <div style="display:flex;align-items:center;flex-shrink:0">
     <div class="logo">
       <div class="logo-i">🤖</div>TwitchBoost
     </div>
@@ -183,33 +197,49 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
     <div class="chip">Авторизовано — <span class="badge" id="mauth">0</span></div>
     <span class="sep">·</span>
     <div class="chip"><span class="sdot" id="sdot"></span>&nbsp;<b id="gst">Не запущено</b></div>
-    <button class="nav-btn follow" onclick="doFollow()" id="follow-btn">❤️ Подписать ботов</button>
-    <a class="nav-btn" id="twitch-open" href="#" target="_blank">↗ Открыть Twitch</a>
+    <button class="nb fl" onclick="doFollow()">❤️ Подписать ботов</button>
+    <a class="nb" id="twitch-open" href="#" target="_blank">↗ Twitch</a>
   </div>
 </div>
 
 <div class="layout">
 
-  <!-- LEFT -->
+  <!-- LEFT: REAL TWITCH CHAT -->
   <div class="pl" id="panel-left">
-    <div class="ph">
-      <span class="ph-t">Чат</span>
-      <div style="display:flex;gap:4px">
-        <button class="btn-xs" onclick="toggleErrPanel()">⚠ ошибки</button>
-        <button class="btn-xs" onclick="clearChat()">Очистить</button>
+    <div class="phead">
+      <span class="phead-t" id="chat-title">Чат Twitch</span>
+      <div class="hbtns">
+        <button class="xbtn" onclick="toggleErr()">⚠</button>
+        <button class="xbtn" onclick="clearChat()">Очист.</button>
       </div>
     </div>
-    <div class="chat-feed" id="chat-feed">
-      <div class="cempty">💬 Сообщения появятся здесь</div>
+
+    <!-- Reply indicator -->
+    <div class="reply-bar" id="reply-bar">
+      <div class="reply-info">
+        <span>↩ Ответ</span>
+        <span id="reply-who" style="font-weight:600"></span>
+        <span class="reply-text" id="reply-preview"></span>
+      </div>
+      <button class="reply-close" onclick="cancelReply()">✕</button>
     </div>
-    <div class="err-toggle" id="err-toggle" onclick="toggleErrPanel()" style="display:none">
-      <div class="err-count">⚠ <span id="err-count-n">0</span> ошибок Twitch</div>
-      <span style="font-size:10px;color:var(--tx3)">▼</span>
+
+    <div class="feed" id="feed">
+      <div class="cempty">💬 Сообщения чата появятся здесь</div>
     </div>
-    <div class="err-panel" id="err-panel"></div>
+
+    <!-- Error strip -->
+    <div class="err-strip" id="err-strip" onclick="toggleErrList()">
+      <div class="err-label">
+        <span>⚠ Ошибки Twitch: <span id="err-n">0</span></span>
+        <span style="font-size:10px;color:var(--tx3)">▼</span>
+      </div>
+      <div class="err-list" id="err-list"></div>
+    </div>
+
     <div class="iz">
       <div class="pbar" id="pbar"></div>
-      <div class="cc-row"><span id="cc">0</span> / 1000</div>
+      <div class="cc-r"><span id="cc">0</span> / 500</div>
       <div class="ir">
         <textarea class="mta" id="msgi" placeholder="Написать сообщение..." rows="1"
           oninput="onInput(this)" onkeydown="onKey(event)"></textarea>
@@ -220,25 +250,25 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
     </div>
   </div>
 
-  <!-- CENTER -->
+  <!-- CENTER: STREAM -->
   <div class="pc" id="panel-center">
     <div class="stb">
       <div class="si">Канал — <b id="sb-ch">—</b></div>
       <div class="si">Аккаунты — <b id="sb-acc">—</b></div>
       <div class="si">Шаблон из биллинга</div>
-      <div class="si">Авторизовано аккаунтов — <span class="badge" id="sb-auth">0</span></div>
+      <div class="si">Авторизовано — <span class="badge" id="sb-auth">0</span></div>
     </div>
     <div class="sf">
       <div class="sph" id="sph">
-        <div class="icon">📺</div>
-        <p style="font-size:12px;margin-bottom:8px">Загрузка стрима...</p>
-        <p style="font-size:11px;color:var(--tx3)" id="embed-hint"></p>
+        <div class="sph-icon">📺</div>
+        <p style="font-size:12px">Загрузка стрима...</p>
+        <p style="font-size:11px;color:var(--tx3);margin-top:4px" id="embed-hint"></p>
       </div>
-      <iframe id="sif" style="display:none" allowfullscreen allow="autoplay"></iframe>
+      <iframe id="sif" style="display:none" allowfullscreen allow="autoplay; fullscreen"></iframe>
     </div>
     <div class="ib">
       <div class="ibl">
-        <div class="lpill" id="lpill" style="display:none">
+        <div class="lpill" id="lpill">
           <span class="sdot on" style="width:6px;height:6px"></span> LIVE
         </div>
         <span class="chn" id="ch-n">—</span>
@@ -252,7 +282,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
     </div>
   </div>
 
-  <!-- RIGHT -->
+  <!-- RIGHT: ACCOUNTS -->
   <div class="pr" id="panel-right">
     <div class="ah">
       <div class="albl">Аккаунт для сообщения в чат</div>
@@ -261,9 +291,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
         <button class="at" onclick="setMode('rnd',this)">Случайный</button>
         <button class="at" onclick="setMode('ord',this)">По порядку</button>
       </div>
-      <div class="follow-row">
-        <button class="follow-btn" onclick="doFollow()" id="follow-btn2">❤️ Подписать всех ботов на канал</button>
-        <a class="twitch-link" id="tw-link" href="#" target="_blank">↗</a>
+      <div class="flrow">
+        <button class="fl-btn" onclick="doFollow()" id="fl-btn">❤️ Подписать всех на канал</button>
+        <a class="tw-a" id="tw-link" href="#" target="_blank">↗</a>
       </div>
       <div class="asrch">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--tx3);flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -297,256 +327,295 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
 <script>
 const socket = io();
 let bots={}, sendMode='sel', ordIdx=0, startTime=null, uptTimer=null;
-let channelName='', errCount=0;
+let channelName='', errCnt=0;
+let replyTo=null; // {username, message}
 
-const COLORS=['#7c3aed','#2563eb','#059669','#d97706','#dc2626','#0891b2','#9333ea','#c2410c'];
+const COLORS=['#7c3aed','#2563eb','#059669','#d97706','#dc2626','#0891b2','#9333ea','#c2410c','#0e7490','#be185d'];
 const cmap=new Map(); let ci=0;
-function bc(u){if(!cmap.has(u))cmap.set(u,COLORS[ci++%COLORS.length]);return cmap.get(u);}
+function bc(u){ if(!cmap.has(u)) cmap.set(u,COLORS[ci++%COLORS.length]); return cmap.get(u); }
 
 const PG={
   'ахахха':['ахахаха','KEKW','хахаха','лол','😂','LUL'],
-  'приветствие':['привет всем!','здарова чат','хай!','йо!','привет стример!'],
+  'приветствие':['привет всем!','здарова чат','хай!','йо!','привет!'],
   'оски':['оски?','OMEGALUL','Pog','PogChamp','👀','потнял'],
   'gg':['GG','gg wp','хорошая игра!','красавчик','лёгкая'],
 };
 
-// ── SOCKET ──────────────────────────────────────────────────────────────────
-socket.on('connect', ()=> socket.emit('get:config'));
+// ── SOCKET ───────────────────────────────────────────────────────────────────
+socket.on('connect', () => socket.emit('get:config'));
 
-socket.on('config', cfg=>{
-  channelName = cfg.channel||'';
-  document.getElementById('mc').textContent = channelName||'—';
-  document.getElementById('sb-ch').textContent = channelName||'—';
-  document.getElementById('ch-n').textContent = channelName||'—';
-  if(channelName){
-    const url='https://www.twitch.tv/'+channelName;
-    document.getElementById('twitch-open').href=url;
-    document.getElementById('twitch-open').textContent='↗ '+channelName;
-    document.getElementById('tw-link').href=url;
+socket.on('config', cfg => {
+  channelName = cfg.channel || '';
+  if (channelName) {
+    const url = 'https://www.twitch.tv/' + channelName;
+    document.getElementById('mc').textContent = channelName;
+    document.getElementById('sb-ch').textContent = channelName;
+    document.getElementById('ch-n').textContent = channelName;
+    document.getElementById('twitch-open').href = url;
+    document.getElementById('twitch-open').textContent = '↗ ' + channelName;
+    document.getElementById('tw-link').href = url;
     loadEmbed(channelName);
   }
 });
 
-socket.on('bots:started', d=>{
-  startTime=Date.now(); startUptime();
-  document.getElementById('sdot').className='sdot on';
-  document.getElementById('gst').textContent='Запущено';
-  const n=d.bots.length;
-  document.getElementById('ma').textContent=n;
-  document.getElementById('mauth').textContent=n;
-  document.getElementById('sb-acc').textContent=n;
-  document.getElementById('sb-auth').textContent=n;
-  d.bots.forEach(u=>{ if(!bots[u]) bots[u]={state:'connecting',msgs:0,sel:true}; });
+socket.on('bots:started', d => {
+  if (!startTime) { startTime = Date.now(); startUptime(); }
+  document.getElementById('sdot').className = 'sdot on';
+  document.getElementById('gst').textContent = 'Запущено';
+  const n = d.bots.length;
+  ['ma','mauth','sb-acc','sb-auth'].forEach(id => document.getElementById(id).textContent = n);
+  d.bots.forEach(u => { if (!bots[u]) bots[u] = {state:'connecting',msgs:0,sel:true}; });
   renderAcc();
-  sysMsg('✅ Запущено '+n+' ботов для #'+channelName);
-  toast('ok','✅ Запущено '+n+' ботов');
+  sysMsg('✅ Запущено ' + n + ' ботов для #' + channelName);
+  toast('ok', '✅ Запущено ' + n + ' ботов');
 });
 
-socket.on('bot:status', d=>{
-  if(!bots[d.username]) bots[d.username]={state:d.state,msgs:0,sel:true};
-  else bots[d.username].state=d.state;
-  updBotDot(d.username, d.state, d.message);
+socket.on('bot:status', d => {
+  if (!bots[d.username]) bots[d.username] = {state:d.state,msgs:0,sel:true};
+  else bots[d.username].state = d.state;
+  updDot(d.username, d.state, d.message);
 });
 
-socket.on('bot:message', d=>{
-  if(!bots[d.username]) bots[d.username]={state:'connected',msgs:0,sel:true};
-  bots[d.username].msgs=(bots[d.username].msgs||0)+1;
-  chatMsg(d.username,d.message,'ai');
-  const el=document.getElementById('amsg-'+d.username);
-  if(el) el.textContent=bots[d.username].msgs+' msg';
+// Real Twitch chat message (from reader client)
+socket.on('chat:message', d => {
+  addChatMsg(d.username, d.message, d.isBot, d.color, d.displayName, d.id);
 });
 
-socket.on('bot:error', d=>{
-  errCount++;
-  document.getElementById('err-count-n').textContent=errCount;
-  document.getElementById('err-toggle').style.display='';
-  const panel=document.getElementById('err-panel');
-  const item=document.createElement('div');
-  item.className='err-item';
-  item.textContent=d.username+': ['+d.code+'] '+d.message;
-  panel.appendChild(item);
-  // Also in chat
-  chatMsg(d.username, '⚠ '+d.code+': '+d.message, 'err');
-  toast('err','⚠ '+d.username+': '+d.message);
+// Our bot's outgoing message (echoed back as confirmation)
+socket.on('bot:message', d => {
+  if (!bots[d.username]) bots[d.username] = {state:'connected',msgs:0,sel:true};
+  bots[d.username].msgs = (bots[d.username].msgs || 0) + 1;
+  const el = document.getElementById('amsg-' + d.username);
+  if (el) el.textContent = bots[d.username].msgs + ' msg';
 });
 
-socket.on('stream:info', d=>{
+socket.on('bot:error', d => {
+  errCnt++;
+  document.getElementById('err-n').textContent = errCnt;
+  document.getElementById('err-strip').style.display = '';
+  const list = document.getElementById('err-list');
+  const item = document.createElement('div');
+  item.className = 'err-it';
+  item.textContent = d.username + ': [' + d.code + '] ' + d.message;
+  list.appendChild(item);
+  toast('err', '⚠ ' + d.username + ': ' + d.message);
+});
+
+socket.on('stream:info', d => {
   document.getElementById('lpill').style.display = d.live ? 'flex' : 'none';
-  if(d.game) document.getElementById('game-n').textContent='· '+d.game;
-  if(d.viewers != null) document.getElementById('vcnt').textContent=d.viewers.toLocaleString();
+  if (d.game) document.getElementById('game-n').textContent = '· ' + d.game;
+  if (d.viewers != null) document.getElementById('vcnt').textContent = d.viewers.toLocaleString();
 });
-socket.on('stream:viewers', d=>{
-  document.getElementById('vcnt').textContent=d.viewers.toLocaleString();
+socket.on('stream:viewers', d => {
+  document.getElementById('vcnt').textContent = d.viewers.toLocaleString();
 });
-socket.on('error', d=>{ toast('err','❌ '+d.message); sysMsg('❌ '+d.message); });
+socket.on('error', d => { toast('err', '❌ ' + d.message); sysMsg('❌ ' + d.message); });
 
 // ── EMBED ─────────────────────────────────────────────────────────────────────
-function loadEmbed(ch){
-  const iframe=document.getElementById('sif');
-  const ph=document.getElementById('sph');
-  const hint=document.getElementById('embed-hint');
-  // Use exact hostname as parent
-  const host=window.location.hostname;
-  const src='https://player.twitch.tv/?channel='+ch+'&parent='+host+'&muted=false&autoplay=true';
-  console.log('[embed] src='+src);
-  hint.textContent='parent: '+host;
-  iframe.src=src;
-  iframe.style.display='block';
-  ph.style.display='none';
-  // Fallback: if iframe errors, show link
-  iframe.onerror=()=>{
-    iframe.style.display='none'; ph.style.display='';
-    hint.innerHTML='<a href="https://twitch.tv/'+ch+'" target="_blank" style="color:var(--pl)">Открыть стрим ↗</a>';
-  };
+let embedLoaded = false;
+function loadEmbed(ch) {
+  if (embedLoaded) return;
+  embedLoaded = true;
+  const iframe = document.getElementById('sif');
+  const ph = document.getElementById('sph');
+  const hint = document.getElementById('embed-hint');
+  const host = window.location.hostname;
+  const src = 'https://player.twitch.tv/?channel=' + ch + '&parent=' + host + '&muted=false&autoplay=true';
+  console.log('[embed]', src);
+  hint.textContent = 'parent: ' + host;
+  iframe.src = src;
+  iframe.style.display = 'block';
+  ph.style.display = 'none';
 }
-function expandStream(){
-  const el=document.querySelector('.sf');
-  if(document.fullscreenElement) document.exitFullscreen();
+function expandStream() {
+  const el = document.querySelector('.sf');
+  if (document.fullscreenElement) document.exitFullscreen();
   else el.requestFullscreen?.();
 }
 
-// ── FOLLOW ────────────────────────────────────────────────────────────────────
-async function doFollow(){
-  const btn=document.getElementById('follow-btn');
-  const btn2=document.getElementById('follow-btn2');
-  [btn,btn2].forEach(b=>{if(b){b.disabled=true;b.textContent='Подписываю...';} });
-  try{
-    const r=await fetch('/api/follow',{method:'POST'});
-    const data=await r.json();
-    if(data.error){ toast('err','❌ '+data.error); }
-    else {
-      const ok=data.results.filter(x=>x.ok).length;
-      const fail=data.results.filter(x=>!x.ok);
-      toast('ok','❤️ Подписано: '+ok+'/'+data.results.length);
-      if(fail.length) fail.forEach(f=>toast('info','⚠ '+f.username+': '+f.error));
-      data.results.forEach(r=>{
-        sysMsg((r.ok?'❤️ ':'⚠ ')+r.username+(r.ok?' подписан':': '+r.error));
-      });
-    }
-  }catch(e){ toast('err','❌ Ошибка: '+e.message); }
-  finally{
-    [btn,btn2].forEach(b=>{if(b){b.disabled=false;b.textContent=b===btn?'❤️ Подписать ботов':'❤️ Подписать всех ботов на канал';}});
-  }
+// ── CHAT ─────────────────────────────────────────────────────────────────────
+function addChatMsg(username, text, isBot, twitchColor, displayName, msgId) {
+  const feed = document.getElementById('feed');
+  const emp = feed.querySelector('.cempty'); if (emp) emp.remove();
+
+  const color = twitchColor || bc(username);
+  const name = displayName || username;
+  const d = document.createElement('div');
+  d.className = 'cm' + (isBot ? ' bot-msg' : '');
+  d.dataset.msgid = msgId || '';
+  d.dataset.username = username;
+  d.dataset.text = text;
+
+  d.innerHTML = `
+    <div class="cm-av" style="background:${color}">${name[0].toUpperCase()}</div>
+    <div class="cm-body">
+      <span class="cm-name" style="color:${color}" onclick="setReply('${esc(username)}','${esc(text)}')">${esc(name)}</span><span class="cm-text">${esc(text)}</span>
+    </div>
+    <div class="cm-actions">
+      <button class="ca-btn" title="Ответить" onclick="setReply('${esc(username)}','${esc(text)}')">↩</button>
+    </div>`;
+
+  feed.appendChild(d);
+  feed.scrollTop = feed.scrollHeight;
+  while (feed.children.length > 300) feed.removeChild(feed.firstChild);
+}
+
+function sysMsg(t) {
+  const feed = document.getElementById('feed');
+  const emp = feed.querySelector('.cempty'); if (emp) emp.remove();
+  const d = document.createElement('div'); d.className = 'cm sys';
+  d.innerHTML = `<div class="cm-body"><span class="cm-text">${esc(t)}</span></div>`;
+  feed.appendChild(d); feed.scrollTop = feed.scrollHeight;
+}
+
+function clearChat() {
+  document.getElementById('feed').innerHTML = '<div class="cempty">💬 Лог очищен</div>';
+  replyTo = null;
+  document.getElementById('reply-bar').classList.remove('show');
+}
+
+// ── REPLY ─────────────────────────────────────────────────────────────────────
+function setReply(username, text) {
+  replyTo = { username, text };
+  document.getElementById('reply-who').textContent = '@' + username;
+  document.getElementById('reply-preview').textContent = text;
+  document.getElementById('reply-bar').classList.add('show');
+  document.getElementById('msgi').focus();
+}
+function cancelReply() {
+  replyTo = null;
+  document.getElementById('reply-bar').classList.remove('show');
+}
+
+// ── SEND ─────────────────────────────────────────────────────────────────────
+function sendManual() {
+  const inp = document.getElementById('msgi');
+  let txt = inp.value.trim();
+  if (!txt) return;
+
+  // Prepend reply mention
+  if (replyTo) { txt = '@' + replyTo.username + ' ' + txt; cancelReply(); }
+
+  const tgts = getTargets();
+  if (!tgts.length) return toast('err', 'Нет подключённых ботов');
+
+  socket.emit('send:manual', { targets: tgts, message: txt });
+  inp.value = ''; onInput(inp);
+}
+
+function onKey(e) { if (e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendManual();} }
+function onInput(el) {
+  document.getElementById('cc').textContent = el.value.length;
+  el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight,80) + 'px';
 }
 
 // ── ACCOUNTS ─────────────────────────────────────────────────────────────────
-function renderAcc(filter=''){
-  const list=document.getElementById('al');
-  const names=Object.keys(bots).filter(u=>!filter||u.toLowerCase().includes(filter.toLowerCase()));
-  if(!names.length){ list.innerHTML='<div style="text-align:center;padding:30px;color:var(--tx3);font-size:12px">Нет аккаунтов</div>'; return; }
-  list.innerHTML='';
-  names.forEach(u=>{
-    const b=bots[u], color=bc(u);
-    const dc=b.state==='connected'?'on':b.state==='connecting'||b.state==='reconnecting'?'cn':b.state==='error'?'err':'';
-    const d=document.createElement('div');
-    d.className='ai-item'+(b.sel?' sel':''); d.id='ai-'+u; d.onclick=()=>togSel(u);
-    d.innerHTML=`<div class="ava" style="background:${color}">${u[0].toUpperCase()}</div>
-      <div class="ai-info"><div class="ai-n">${esc(u)}</div><div class="ai-s" id="aisub-${u}">${b.state}</div></div>
+function renderAcc(filter='') {
+  const list = document.getElementById('al');
+  const names = Object.keys(bots).filter(u => !filter || u.toLowerCase().includes(filter.toLowerCase()));
+  if (!names.length) { list.innerHTML='<div style="text-align:center;padding:30px;color:var(--tx3);font-size:12px">Нет аккаунтов</div>'; return; }
+  list.innerHTML = '';
+  names.forEach(u => {
+    const b = bots[u], color = bc(u);
+    const dc = b.state==='connected'?'on':b.state==='connecting'||b.state==='reconnecting'?'cn':b.state==='error'?'err':'';
+    const d = document.createElement('div');
+    d.className = 'ai-it' + (b.sel ? ' sel' : ''); d.id = 'ai-' + u; d.onclick = () => togSel(u);
+    d.innerHTML = `<div class="ava" style="background:${color}">${u[0].toUpperCase()}</div>
+      <div class="ai-in"><div class="ai-n">${esc(u)}</div><div class="ai-s" id="aisub-${u}">${b.state}</div></div>
       <div class="ai-r"><div class="adot ${dc}" id="adot-${u}"></div><div class="amsg" id="amsg-${u}">${b.msgs||0} msg</div></div>`;
     list.appendChild(d);
   });
 }
-function updBotDot(u,state,msg){
-  if(!bots[u]) bots[u]={state,msgs:0,sel:true};
-  bots[u].state=state;
-  const dot=document.getElementById('adot-'+u);
-  const sub=document.getElementById('aisub-'+u);
-  if(dot){ const dc=state==='connected'?'on':state==='connecting'||state==='reconnecting'?'cn':state==='error'?'err':''; dot.className='adot '+dc; }
-  if(sub) sub.textContent=msg||state;
+function updDot(u, state, msg) {
+  if (!bots[u]) bots[u] = {state,msgs:0,sel:true};
+  bots[u].state = state;
+  const dot = document.getElementById('adot-'+u);
+  const sub = document.getElementById('aisub-'+u);
+  if (dot) { const dc=state==='connected'?'on':state==='connecting'||state==='reconnecting'?'cn':state==='error'?'err':''; dot.className='adot '+dc; }
+  if (sub && msg) sub.textContent = msg;
 }
-function togSel(u){ bots[u].sel=!bots[u].sel; const el=document.getElementById('ai-'+u); if(el) el.className='ai-item'+(bots[u].sel?' sel':''); }
-function selAll(){ const all=Object.values(bots).every(b=>b.sel); Object.keys(bots).forEach(u=>bots[u].sel=!all); renderAcc(); }
-function filterAcc(v){ renderAcc(v); }
-function setMode(m,btn){ sendMode=m; document.querySelectorAll('.at').forEach(t=>t.classList.remove('on')); btn.classList.add('on'); }
-function getTargets(){
-  const conn=Object.keys(bots).filter(u=>bots[u].state==='connected');
-  if(!conn.length) return [];
-  if(sendMode==='sel'){ const s=conn.filter(u=>bots[u].sel); return s.length?s:conn; }
-  if(sendMode==='rnd') return [conn[Math.floor(Math.random()*conn.length)]];
-  if(sendMode==='ord'){ const b=conn[ordIdx%conn.length]; ordIdx++; return [b]; }
+function togSel(u) { bots[u].sel=!bots[u].sel; const el=document.getElementById('ai-'+u); if(el) el.className='ai-it'+(bots[u].sel?' sel':''); }
+function selAll() { const all=Object.values(bots).every(b=>b.sel); Object.keys(bots).forEach(u=>bots[u].sel=!all); renderAcc(); }
+function filterAcc(v) { renderAcc(v); }
+function setMode(m,btn) { sendMode=m; document.querySelectorAll('.at').forEach(t=>t.classList.remove('on')); btn.classList.add('on'); }
+function getTargets() {
+  const conn = Object.keys(bots).filter(u=>bots[u].state==='connected');
+  if (!conn.length) return [];
+  if (sendMode==='sel') { const s=conn.filter(u=>bots[u].sel); return s.length?s:conn; }
+  if (sendMode==='rnd') return [conn[Math.floor(Math.random()*conn.length)]];
+  if (sendMode==='ord') { const b=conn[ordIdx%conn.length]; ordIdx++; return [b]; }
   return conn;
 }
 
-// ── CHAT ─────────────────────────────────────────────────────────────────────
-function chatMsg(username,text,type='ai'){
-  const feed=document.getElementById('chat-feed');
-  const emp=feed.querySelector('.cempty'); if(emp) emp.remove();
-  const color=bc(username);
-  const d=document.createElement('div'); d.className='cm '+type;
-  d.innerHTML=`<div class="cav" style="background:${color}">${username[0].toUpperCase()}</div><div><span class="cn" style="color:${color}">${esc(username)}:</span><span class="ct">${esc(text)}</span></div>`;
-  feed.appendChild(d); feed.scrollTop=feed.scrollHeight;
-  while(feed.children.length>200) feed.removeChild(feed.firstChild);
-}
-function sysMsg(t){ const feed=document.getElementById('chat-feed'); const emp=feed.querySelector('.cempty'); if(emp) emp.remove(); const d=document.createElement('div'); d.className='cm sys'; d.innerHTML=`<div><span class="ct">${esc(t)}</span></div>`; feed.appendChild(d); feed.scrollTop=feed.scrollHeight; }
-function clearChat(){ document.getElementById('chat-feed').innerHTML='<div class="cempty">💬 Лог очищен</div>'; }
-
-// ── SEND ──────────────────────────────────────────────────────────────────────
-function sendManual(){
-  const inp=document.getElementById('msgi'); const txt=inp.value.trim();
-  if(!txt) return;
-  const tgts=getTargets();
-  if(!tgts.length) return toast('err','Нет подключённых ботов');
-  socket.emit('send:manual',{targets:tgts,message:txt});
-  tgts.forEach(t=>chatMsg(t,txt,'ai'));
-  inp.value=''; onInput(inp);
-}
-function onKey(e){ if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendManual();} }
-function onInput(el){
-  document.getElementById('cc').textContent=el.value.length;
-  el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,80)+'px';
+// ── FOLLOW ────────────────────────────────────────────────────────────────────
+async function doFollow() {
+  const btn = document.getElementById('fl-btn');
+  btn.disabled = true; btn.textContent = 'Подписываю...';
+  try {
+    const r = await fetch('/api/follow', {method:'POST'});
+    const data = await r.json();
+    if (data.error) { toast('err','❌ '+data.error); sysMsg('❌ Follow error: '+data.error); }
+    else {
+      const ok = data.results.filter(x=>x.ok).length;
+      toast('ok','❤️ Подписано: '+ok+'/'+data.results.length);
+      data.results.forEach(r => sysMsg((r.ok?'❤️':'⚠')+' '+r.username+(r.ok?' подписан':': '+r.error)));
+    }
+  } catch(e) { toast('err','❌ '+e.message); }
+  finally { btn.disabled=false; btn.textContent='❤️ Подписать всех на канал'; }
 }
 
 // ── PHRASES ───────────────────────────────────────────────────────────────────
-function sendPhrase(g){
-  const phrases=PG[g]; if(!phrases||!phrases.length) return;
-  const txt=phrases[Math.floor(Math.random()*phrases.length)];
-  const tgts=getTargets(); if(!tgts.length) return toast('err','Нет ботов');
-  socket.emit('send:manual',{targets:tgts,message:txt});
-  tgts.forEach(t=>chatMsg(t,txt,'ai'));
+function sendPhrase(g) {
+  const phrases = PG[g]; if (!phrases||!phrases.length) return;
+  const txt = phrases[Math.floor(Math.random()*phrases.length)];
+  const tgts = getTargets(); if (!tgts.length) return toast('err','Нет ботов');
+  socket.emit('send:manual', {targets:tgts, message:txt});
 }
-function renderPhrases(){
-  const bar=document.getElementById('pbar'); bar.innerHTML='';
-  Object.keys(PG).forEach(g=>{ const b=document.createElement('button'); b.className='pb'; b.textContent=g; b.onclick=()=>sendPhrase(g); bar.appendChild(b); });
-  const a=document.createElement('button'); a.className='padd'; a.textContent='+'; a.onclick=openPM; bar.appendChild(a);
+function renderPhrases() {
+  const bar = document.getElementById('pbar'); bar.innerHTML='';
+  Object.keys(PG).forEach(g => { const b=document.createElement('button'); b.className='pb'; b.textContent=g; b.onclick=()=>sendPhrase(g); bar.appendChild(b); });
+  const a = document.createElement('button'); a.className='padd'; a.textContent='+'; a.onclick=openPM; bar.appendChild(a);
 }
-function openPM(){ document.getElementById('pmod').classList.add('open'); }
-function closePM(){ document.getElementById('pmod').classList.remove('open'); document.getElementById('pn').value=''; document.getElementById('pt').value=''; }
-function savePG(){
+function openPM() { document.getElementById('pmod').classList.add('open'); }
+function closePM() { document.getElementById('pmod').classList.remove('open'); document.getElementById('pn').value=''; document.getElementById('pt').value=''; }
+function savePG() {
   const name=document.getElementById('pn').value.trim();
   const texts=document.getElementById('pt').value.split('\n').map(s=>s.trim()).filter(Boolean);
-  if(!name||!texts.length) return toast('err','Заполни поля');
+  if (!name||!texts.length) return toast('err','Заполни поля');
   PG[name]=texts; renderPhrases(); closePM(); toast('ok','✅ Группа "'+name+'" добавлена');
 }
 
-// ── ERROR PANEL ───────────────────────────────────────────────────────────────
-function toggleErrPanel(){ document.getElementById('err-panel').classList.toggle('open'); }
+// ── ERRORS ────────────────────────────────────────────────────────────────────
+function toggleErr() {
+  const strip = document.getElementById('err-strip');
+  strip.style.display = strip.style.display==='none'?'':'none';
+}
+function toggleErrList() { document.getElementById('err-list').classList.toggle('open'); }
 
 // ── TABS ──────────────────────────────────────────────────────────────────────
-function switchTab(tab,btn){
+function switchTab(tab,btn) {
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('on')); btn.classList.add('on');
   const pl=document.getElementById('panel-left');
   const pc=document.getElementById('panel-center');
   const pr=document.getElementById('panel-right');
-  pl.style.display=''; pc.style.display=''; pr.style.display='';
-  pr.style.width=''; pr.style.gridColumn='';
-  if(tab==='accounts'){ pl.style.display='none'; pc.style.display='none'; pr.style.width='100%'; }
-  else if(tab==='operators'){ pr.style.display='none'; }
+  pl.style.display=''; pc.style.display=''; pr.style.display=''; pr.style.width='';
+  if (tab==='accounts') { pl.style.display='none'; pc.style.display='none'; pr.style.width='100%'; }
+  else if (tab==='operators') { pr.style.display='none'; }
 }
 
 // ── UPTIME ────────────────────────────────────────────────────────────────────
-function startUptime(){
-  uptTimer=setInterval(()=>{
-    const d=Date.now()-startTime;
-    const h=String(Math.floor(d/3600000)).padStart(2,'0');
-    const m=String(Math.floor((d%3600000)/60000)).padStart(2,'0');
-    const s=String(Math.floor((d%60000)/1000)).padStart(2,'0');
-    document.getElementById('upt').textContent=h+':'+m+':'+s;
-  },1000);
+function startUptime() {
+  uptTimer = setInterval(() => {
+    const d = Date.now()-startTime;
+    const h = String(Math.floor(d/3600000)).padStart(2,'0');
+    const m = String(Math.floor((d%3600000)/60000)).padStart(2,'0');
+    const s = String(Math.floor((d%60000)/1000)).padStart(2,'0');
+    document.getElementById('upt').textContent = h+':'+m+':'+s;
+  }, 1000);
 }
 
-// ── UTILS ─────────────────────────────────────────────────────────────────────
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function toast(type,msg){
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function toast(type,msg) {
   const w=document.getElementById('toasts');
   const t=document.createElement('div'); t.className='toast '+type; t.textContent=msg;
   w.appendChild(t);

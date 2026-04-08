@@ -1,26 +1,22 @@
 import Groq from 'groq-sdk';
 
 const PERSONAS = [
-  { style: 'enthusiastic fan', traits: 'Very hyped, short excited messages, uses exclamations' },
-  { style: 'chill viewer', traits: 'Relaxed, casual, uses lol/lmao, laid back' },
-  { style: 'helpful viewer', traits: 'Gives tips, asks strategic questions, knowledgeable' },
-  { style: 'funny troll', traits: 'Makes jokes, light-hearted, puns, never mean' },
-  { style: 'newbie', traits: 'Asks questions, curious, impressed, innocent reactions' },
-  { style: 'veteran gamer', traits: 'References old games, technical, nostalgic' },
-  { style: 'hype man', traits: 'PogChamp energy, hypes up plays, reactive' },
-  { style: 'analyst', traits: 'Strategic observations, thoughtful, brief insights' },
+  { style: 'enthusiastic hype fan',       traits: 'Very excited, short reactions, uses PogChamp/LUL, hyped for every play' },
+  { style: 'chill lurker',                traits: 'Relaxed, rare comments, uses "lol" "lmao", brief and casual' },
+  { style: 'strategic advisor',           traits: 'Gives tactical tips, references game mechanics, knowledgeable' },
+  { style: 'friendly comedian',           traits: 'Makes puns and jokes, light-hearted, never mean, playful' },
+  { style: 'curious newbie',              traits: 'Asks questions about the game, easily amazed, learning' },
+  { style: 'nostalgic veteran gamer',     traits: 'Compares to old games, experienced perspective, brief insights' },
+  { style: 'hype train conductor',        traits: 'CAPS sometimes, rallies chat, "LET\'S GO" energy, very reactive' },
+  { style: 'calm thoughtful analyst',     traits: 'Measured observations, no hype, concise and precise' },
 ];
 
-interface ChatHistory {
-  role: 'user' | 'assistant';
-  content: string;
-}
+interface HistoryMsg { role: 'user' | 'assistant'; content: string; }
 
 export class AIService {
   private groq: Groq;
-  private personas = new Map<string, (typeof PERSONAS)[0]>();
-  private histories = new Map<string, ChatHistory[]>();
-  private recentChat: string[] = [];
+  private histories = new Map<string, HistoryMsg[]>();
+  private recentRealChat: string[] = [];
   private settings: Record<string, boolean>;
 
   constructor(apiKey: string, settings: Record<string, boolean> = {}) {
@@ -29,75 +25,88 @@ export class AIService {
   }
 
   addChatContext(line: string): void {
-    this.recentChat.push(line);
-    if (this.recentChat.length > 15) this.recentChat.shift();
-  }
-
-  private getPersona(username: string) {
-    if (!this.personas.has(username)) {
-      const idx = this.personas.size % PERSONAS.length;
-      this.personas.set(username, PERSONAS[idx]);
-    }
-    return this.personas.get(username)!;
+    this.recentRealChat.push(line);
+    if (this.recentRealChat.length > 10) this.recentRealChat.shift();
   }
 
   async generateMessage(
     username: string,
     context: string,
-    language: string
+    language: string,
+    botIndex = 0
   ): Promise<string> {
-    const persona = this.getPersona(username);
+    const persona = PERSONAS[botIndex % PERSONAS.length];
     const langName = language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English';
-    const emojiHint = this.settings.useEmoji
-      ? 'May use Twitch emotes like LUL, Pog, KEKW, or relevant emojis occasionally.'
+
+    const emojiLine = this.settings.useEmoji
+      ? 'Occasionally use Twitch emotes: LUL Pog PogChamp KEKW monkaS GG or simple emojis.'
       : 'Do not use emojis.';
-    const chatCtx = this.settings.chatContext && this.recentChat.length
-      ? '\nRecent chat:\n' + this.recentChat.slice(-5).join('\n')
+
+    const chatCtxLines = this.settings.chatContext && this.recentRealChat.length
+      ? '\nRecent viewer messages:\n' + this.recentRealChat.slice(-4).join('\n')
       : '';
 
-    const system = `You are a Twitch viewer "${username}" watching a live stream.
-Personality: ${persona.style}. Traits: ${persona.traits}.
-Language: ${langName}. Be SHORT (5-20 words max). Natural and varied.
-${emojiHint}
-Stream context: ${context || 'Gaming stream'}${chatCtx}
-Generate ONE unique chat message. Output ONLY the message, nothing else.`;
+    const system = [
+      'You are "' + username + '", a Twitch viewer.',
+      'Personality: ' + persona.style + '.',
+      'Character traits: ' + persona.traits + '.',
+      'Write ONLY in ' + langName + '.',
+      'Message length: 3-18 words MAX. Be very natural and human.',
+      emojiLine,
+      'Stream/game context: ' + (context || 'gaming stream') + '.',
+      chatCtxLines,
+      '',
+      'Rules:',
+      '- Output ONLY the chat message. No quotes, no explanation.',
+      '- Never repeat your previous messages.',
+      '- Sound like a real Twitch viewer, not a bot.',
+      '- Vary your style every message.',
+    ].join('\n');
 
     const history = this.histories.get(username) || [];
 
     try {
-      const res = await this.groq.chat.completions.create({
+      const response = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 60,
-        temperature: 0.92,
-        frequency_penalty: 0.85,
-        presence_penalty: 0.6,
+        max_tokens: 50,
+        temperature: 0.95,
+        top_p: 0.95,
+        frequency_penalty: 1.0,
+        presence_penalty: 0.8,
         messages: [
           { role: 'system', content: system },
-          ...history.slice(-8),
-          { role: 'user', content: 'Send a chat message now.' },
+          ...history.slice(-6),
+          { role: 'user' as const, content: 'Post one chat message now.' },
         ],
       });
 
-      const msg = res.choices[0]?.message?.content?.trim().replace(/^["']|["']$/g, '') || '';
-      
-      // Update history
-      const newHistory: ChatHistory[] = [
+      const raw = response.choices[0]?.message?.content?.trim() || '';
+      const msg = raw.replace(/^["'`]|["'`]$/g, '').trim();
+
+      if (!msg) return this.fallback(language);
+
+      // Store in history to avoid repeating
+      const newHistory: HistoryMsg[] = [
         ...history,
-        { role: 'user' as const, content: 'Send a chat message now.' },
+        { role: 'user' as const, content: 'Post one chat message now.' },
         { role: 'assistant' as const, content: msg },
-      ].slice(-10);
+      ].slice(-8);
       this.histories.set(username, newHistory);
 
       return msg.slice(0, 200);
     } catch (err: any) {
-      console.error(`[AI] ${username}: ${err.message}`);
-      const fallbacks: Record<string, string[]> = {
-        ru: ['nice!', 'gg!', 'давай!', 'лол', '😮', 'хорошо сыграно'],
-        en: ['nice!', 'gg!', 'let\'s go!', 'lol', 'PogChamp'],
-        kk: ['жарайсың!', 'gg!', 'алға!'],
-      };
-      const arr = fallbacks[language] || fallbacks.en;
-      return arr[Math.floor(Math.random() * arr.length)];
+      console.error('[ai] generateMessage error for ' + username + ':', err.message);
+      return this.fallback(language);
     }
+  }
+
+  private fallback(language: string): string {
+    const f: Record<string, string[]> = {
+      ru: ['gg', 'лол', 'давай!', '😮', 'ого', 'красавчик', 'нис', 'хорошо сыграно', 'пог'],
+      en: ['gg', 'lol', 'nice!', 'Pog', 'let\'s go', 'GG', 'hype'],
+      kk: ['жарайсың', 'gg', 'алға!', 'нис'],
+    };
+    const arr = f[language] || f.en;
+    return arr[Math.floor(Math.random() * arr.length)];
   }
 }

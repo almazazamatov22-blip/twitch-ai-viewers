@@ -149,9 +149,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);heigh
       TwitchBoost
     </div>
     <div class="nav-tabs">
-      <button class="nav-tab active">Чат</button>
-      <button class="nav-tab">Аккаунты</button>
-      <button class="nav-tab">Операторы</button>
+      <button class="nav-tab active" onclick="switchTab('chat',this)">Чат</button>
+      <button class="nav-tab" onclick="switchTab('accounts',this)">Аккаунты</button>
+      <button class="nav-tab" onclick="switchTab('operators',this)">Операторы</button>
     </div>
   </div>
   <div class="topbar-right">
@@ -341,7 +341,14 @@ function loadEmbed(ch){
   const iframe=document.getElementById('stream-iframe');
   const ph=document.getElementById('stream-ph');
   const host=window.location.hostname||'localhost';
-  iframe.src=`https://player.twitch.tv/?channel=${ch}&parent=${host}&muted=true`;
+  // Build parent params - include both the actual host and railway fallbacks
+  const parents=[host];
+  if(host.includes('railway.app')||host.includes('up.railway.app')){
+    // Railway uses the full subdomain as parent
+    parents.push('up.railway.app');
+  }
+  const parentParams=parents.map(p=>'parent='+p).join('&');
+  iframe.src='https://player.twitch.tv/?channel='+ch+'&'+parentParams+'&muted=true';
   iframe.style.display='block'; ph.style.display='none';
 }
 function expandStream(){
@@ -501,6 +508,25 @@ function toast(type,msg){
 }
 
 renderPhrases();
+
+function switchTab(tab, btn){
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  btn.classList.add('active');
+  // Show/hide panels
+  const left=document.querySelector('.panel-left');
+  const center=document.querySelector('.panel-center');
+  const right=document.querySelector('.panel-right');
+  if(tab==='chat'){
+    left.style.display=''; center.style.display=''; right.style.display='';
+  } else if(tab==='accounts'){
+    // Show accounts full width
+    left.style.display='none'; center.style.display='none'; right.style.display='';
+    right.style.width='100%';
+  } else if(tab==='operators'){
+    left.style.display=''; center.style.display=''; right.style.display='none';
+  }
+}
+
 </script>
 </body>
 </html>

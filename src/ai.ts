@@ -83,8 +83,8 @@ Generate ONE unique chat message. Output ONLY the message, nothing else.`;
       // Update history
       const newHistory: ChatHistory[] = [
         ...history,
-        { role: 'user', content: 'Send a chat message now.' },
-        { role: 'assistant', content: msg },
+        { role: 'user' as const, content: 'Send a chat message now.' },
+        { role: 'assistant' as const, content: msg },
       ].slice(-10);
       this.histories.set(username, newHistory);
 

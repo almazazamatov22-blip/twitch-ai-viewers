@@ -1,67 +1,43 @@
 import Groq from 'groq-sdk';
 
-// Each bot persona - deterministic by index so they never collide
-const PERSONAS: { role: string; sys: string }[] = [
-  {
-    role: 'hype_fan',
-    sys: `You are an excited Twitch chat viewer. You react to what's happening in the stream with short hyped messages.
-Examples: "LET'S GOOO", "ПОГНАЛИ", "ПОГС", "AAAA", "🔥🔥🔥", "ЭТО МОЩЬ"
-2-8 words. Very energetic. Use Twitch emotes sometimes.`,
+// Custom persona override by username (lowercase)
+const CUSTOM_PERSONAS: Record<string, { sys: string }> = {
+  'olegzhoskii': {
+    sys: `Ти — Олег, 15-річний українець, школяр, фанат стримера. Пишеш ТІЛЬКИ українською мовою (не російською!). 
+Стиль: як підліток — коротко, емоційно, іноді помилки в словах, використовуєш "бро", "топ", "лол", "кайф", "gg", "пг".
+Приклади: "топ момент бро!", "лол він зафейлив", "кайфова гра", "gg wp", "оце так поворот лол", "бро ти кращий"
+Максимум 10 слів. ТІЛЬКИ українська!`,
   },
-  {
-    role: 'chill_viewer',
-    sys: `You are a chill Twitch viewer. Casual short comments about the stream.
-Examples: "лол", "норм", "gg", "хм интересно", "lmao", "это было нормально"
-2-10 words. Relaxed tone. No hype.`,
-  },
-  {
-    role: 'gamer',
-    sys: `You are an experienced gamer watching Twitch. Short tactical/game comments.
-Examples: "надо было пушить", "классный билд", "gg wp", "это работает кстати"
-3-12 words. Show game knowledge.`,
-  },
-  {
-    role: 'comedian',
-    sys: `You are a funny Twitch viewer. Light jokes and playful comments.
-Examples: "лол это была случайность да", "KEKW он это серьезно", "streamer.exe has stopped"
-2-12 words. Funny but kind.`,
-  },
-  {
-    role: 'newbie',
-    sys: `You are a new viewer on Twitch. Curious and amazed by what happens.
-Examples: "ого как это он сделал??", "а можно так?", "это нормально??", "вау"
-2-10 words. Genuine reactions.`,
-  },
-  {
-    role: 'analyst',
-    sys: `You are a calm analytical viewer. Short smart observations about the stream.
-Examples: "интересное решение", "статистически спорно", "хороший тайминг", "правильная ротация"
-3-12 words.`,
-  },
-  {
-    role: 'hype_train',
-    sys: `You are a hype train in Twitch chat. Rally everyone, short energetic bursts.
-Examples: "ЧАААААТ", "ДАВАЙ ДАВАЙ", "СТРИМ ОГОНЬ", "ВСЕ В ЧАТ", "ПОЕХАЛИ"
-2-6 words. CAPS OK.`,
-  },
-  {
-    role: 'supporter',
-    sys: `You are a loyal supporter of the streamer. Encouraging short messages.
-Examples: "красавчик", "так держать", "лучший стример", "ты справишься", "мы верим"
-2-10 words. Warm and supportive.`,
-  },
+};
+
+const DEFAULT_PERSONAS = [
+  { role: 'hype_fan',   sys: 'Excited Twitch viewer. Short hyped reactions. PogChamp energy. 2-8 words.' },
+  { role: 'chill',      sys: 'Chill Twitch viewer. Casual brief comments. Uses lol/lmao. 2-10 words.' },
+  { role: 'gamer',      sys: 'Experienced gamer watching stream. Short tactical comments. 3-12 words.' },
+  { role: 'comedian',   sys: 'Funny Twitch viewer. Light jokes. Never mean. 2-12 words.' },
+  { role: 'newbie',     sys: 'New curious viewer. Amazed reactions and short questions. 2-10 words.' },
+  { role: 'analyst',    sys: 'Calm analytical viewer. Brief smart observations. 3-12 words.' },
+  { role: 'hype_train', sys: 'Hype train viewer. Rally chat. Short energetic bursts. CAPS OK. 2-6 words.' },
+  { role: 'supporter',  sys: 'Loyal supporter. Short encouraging messages. 2-10 words.' },
 ];
 
-// Proactive triggers — bot messages NOT based on chat, based on stream
-const PROACTIVE_PROMPTS = [
-  'React to a moment that just happened in the stream.',
-  'Comment on something you noticed in the game/stream.',
-  'Share a quick thought about the stream so far.',
-  'React to the gameplay you are watching.',
-  'Say something you genuinely think while watching this stream.',
-  'Write a message that fits the energy of the stream right now.',
-  'Comment on the streamer\'s play or decision.',
+const PROACTIVE = [
+  'React to a moment in the stream.',
+  'Comment on the gameplay.',
+  'Share a quick thought about the stream.',
+  'React to what just happened.',
+  'Write something you\'d genuinely type watching this.',
+  'Comment on the streamer\'s play.',
+  'React to the current game situation.',
 ];
+
+export interface TranscriptEntry {
+  username: string;
+  message: string;
+  trigger: string;
+  persona: string;
+  timestamp: number;
+}
 
 interface Msg { role: 'user' | 'assistant'; content: string; }
 
@@ -70,6 +46,7 @@ export class AIService {
   private histories = new Map<string, Msg[]>();
   private recentChat: string[] = [];
   private settings: Record<string, boolean>;
+  public transcriptLog: TranscriptEntry[] = [];
 
   constructor(apiKey: string, settings: Record<string, boolean> = {}) {
     this.groq = new Groq({ apiKey });
@@ -86,48 +63,55 @@ export class AIService {
     context: string,
     language: string,
     botIndex = 0,
-    isReactive = false   // true = reacting to chat, false = proactive stream comment
+    isReactive = false,
+    replyToMsg?: string   // when someone @tagged this bot
   ): Promise<string> {
-    const persona = PERSONAS[botIndex % PERSONAS.length];
-    const lang = language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English';
-    const emojiLine = this.settings.useEmoji
-      ? 'Occasionally use Twitch emotes (LUL Pog KEKW monkaS PogChamp) or fitting emojis.'
-      : 'No emojis.';
+    const key = username.toLowerCase();
+    const custom = CUSTOM_PERSONAS[key];
+    const persona = custom
+      ? { role: key, sys: custom.sys }
+      : DEFAULT_PERSONAS[botIndex % DEFAULT_PERSONAS.length];
 
-    // Build context block
-    let ctxBlock = '';
-    if (context) ctxBlock += '\nStream info: ' + context;
-    if (this.recentChat.length > 0 && isReactive) {
-      ctxBlock += '\nRecent chat:\n' + this.recentChat.slice(-5).join('\n');
-    } else if (this.recentChat.length > 0) {
-      // Just the last message for awareness, not for reacting
-      ctxBlock += '\n(Latest chat: ' + this.recentChat[this.recentChat.length - 1] + ')';
+    // Custom personas always use their own language
+    const lang = custom
+      ? '' // language forced in sys prompt
+      : (language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English');
+
+    const emojiLine = this.settings.useEmoji
+      ? 'Occasionally use Twitch emotes (LUL Pog KEKW PogChamp) or emojis.' : '';
+
+    let ctxBlock = context ? '\nStream context: ' + context : '';
+    if (this.recentChat.length > 0) {
+      ctxBlock += '\nRecent chat:\n' + this.recentChat.slice(-4).join('\n');
     }
 
-    // Pick a proactive prompt randomly when not reactive
-    const trigger = isReactive
-      ? 'React to the recent chat messages above. Write one natural reply.'
-      : PROACTIVE_PROMPTS[Math.floor(Math.random() * PROACTIVE_PROMPTS.length)];
+    let trigger: string;
+    if (replyToMsg) {
+      trigger = 'Someone tagged you in chat: "' + replyToMsg + '". Reply naturally in 1-2 sentences.';
+    } else if (isReactive) {
+      trigger = 'React to the recent chat messages above. One natural reply.';
+    } else {
+      trigger = PROACTIVE[Math.floor(Math.random() * PROACTIVE.length)];
+    }
 
     const system = [
       persona.sys,
-      'ALWAYS write in ' + lang + ' only. Never switch language.',
+      lang ? 'ALWAYS write in ' + lang + ' only.' : '',
       emojiLine,
       ctxBlock,
-      'RULES: Output ONLY the chat message. No username prefix. No quotes. Max 20 words.',
-      'Make it feel like a real human viewer typed this spontaneously.',
-      'Never repeat what you said before.',
-    ].join('\n');
+      'Output ONLY the chat message. No quotes. No username prefix. Max 20 words.',
+      'Never repeat previous messages. Sound like a real human viewer.',
+    ].filter(Boolean).join('\n');
 
     const history = this.histories.get(username) || [];
 
     try {
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 40,
-        temperature: 1.0,
-        frequency_penalty: 1.4,
-        presence_penalty: 1.1,
+        max_tokens: 50,
+        temperature: 0.97,
+        frequency_penalty: 1.3,
+        presence_penalty: 1.0,
         messages: [
           { role: 'system', content: system },
           ...history.slice(-4),
@@ -137,12 +121,11 @@ export class AIService {
 
       const raw = (res.choices[0]?.message?.content || '').trim()
         .replace(/^["'`*_]+|["'`*_]+$/g, '')
-        .replace(/^\w+:\s*/, '') // strip "username: " prefix if AI added it
+        .replace(/^\w+:\s*/, '')
         .trim();
 
-      if (!raw || raw.length < 2) return this.fallback(language);
+      if (!raw || raw.length < 2) return this.fallback(language, !!custom);
 
-      // Store for dedup
       const updated: Msg[] = [
         ...history,
         { role: 'user' as const, content: trigger },
@@ -150,19 +133,33 @@ export class AIService {
       ].slice(-8);
       this.histories.set(username, updated);
 
-      console.log('[ai]', username, `(${persona.role}${isReactive ? '/reactive' : '/proactive'})`, '→', raw);
+      // Log for transcription view
+      this.transcriptLog.push({
+        username,
+        message: raw,
+        trigger: replyToMsg ? '@reply: ' + replyToMsg : (isReactive ? 'reactive' : trigger),
+        persona: persona.role,
+        timestamp: Date.now(),
+      });
+      if (this.transcriptLog.length > 200) this.transcriptLog.shift();
+
+      console.log('[ai]', username, '(' + persona.role + ')', '→', raw);
       return raw.slice(0, 200);
     } catch (e: any) {
       console.error('[ai] error for', username, ':', e.message);
-      return this.fallback(language);
+      return this.fallback(language, !!custom);
     }
   }
 
-  private fallback(lang: string): string {
+  private fallback(lang: string, isUkrainian = false): string {
+    if (isUkrainian) {
+      const uk = ['gg', 'топ', 'лол', 'кайф', 'бро', 'пг', 'оце так'];
+      return uk[Math.floor(Math.random() * uk.length)];
+    }
     const f: Record<string, string[]> = {
-      ru: ['gg', 'лол', 'давай!', 'ого', 'красавчик', 'нис', 'пог', '🔥', 'KEKW', 'норм'],
-      en: ['gg', 'lol', 'nice', 'Pog', 'let\'s go', 'GG', 'hype', 'yoo', 'KEKW'],
-      kk: ['жарайсың', 'gg', 'алға', 'нис', 'ого'],
+      ru: ['gg', 'лол', 'давай!', 'ого', 'красавчик', 'нис', '🔥', 'норм'],
+      en: ['gg', 'lol', 'nice', 'Pog', 'let\'s go', 'GG', 'hype'],
+      kk: ['жарайсың', 'gg', 'алға', 'нис'],
     };
     const arr = f[lang] || f.en;
     return arr[Math.floor(Math.random() * arr.length)];

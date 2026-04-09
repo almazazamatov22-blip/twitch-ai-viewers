@@ -29,9 +29,9 @@ function readConfig() {
   const channel = extractChannel(process.env.TWITCH_CHANNEL || '');
   const groqKey = (process.env.GROQ_API_KEY || '').trim();
   const language = (process.env.ORIGINAL_STREAM_LANGUAGE || 'ru').trim();
-  // Default 15 seconds — much more active than before
   const interval = parseInt(process.env.MESSAGE_INTERVAL || '15');
   const context = (process.env.STREAM_CONTEXT || '').trim();
+  const viewerSim = process.env.VIEWER_SIM !== 'false'; // default enabled
 
   const bots: { username: string; token: string }[] = [];
   for (let i = 1; i <= 50; i++) {
@@ -39,10 +39,10 @@ function readConfig() {
     const t = (process.env['BOT' + i + '_OAUTH'] || process.env['BOT' + i + '_OAUTH_TOKEN'])?.trim();
     if (u && t) bots.push({ username: u, token: t });
   }
-  return { channel, groqKey, language, interval, context, bots };
+  return { channel, groqKey, language, interval, context, bots, viewerSim };
 }
 
-// ── Twitch Helix ─────────────────────────────────────────────────────────────
+// ── Twitch Helix ──────────────────────────────────────────────────────────────
 let appToken: string | null = null;
 
 async function getAppToken(): Promise<string | null> {
@@ -77,7 +77,6 @@ async function getStreamData(channel: string): Promise<{ live: boolean; viewers?
         headers: { 'Client-ID': cid, Authorization: 'Bearer ' + appToken },
       }),
     ]);
-
     const userId = uRes.data.data?.[0]?.id as string | undefined;
     const s = sRes.data.data?.[0];
     if (s) return { live: true, viewers: s.viewer_count, game: s.game_name, userId, title: s.title };
@@ -89,32 +88,24 @@ async function getStreamData(channel: string): Promise<{ live: boolean; viewers?
   }
 }
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────────────────────
 let manager: BotManager | null = null;
 let streamPoll: NodeJS.Timeout | null = null;
 let startedBots: string[] = [];
 let isStarted = false;
-let channelUserId: string | null = null;
-let streamTitle = '';
 
-// ── API ───────────────────────────────────────────────────────────────────────
-app.post('/api/follow', async (_req, res) => {
-  // Twitch removed follow API in 2023 — inform user
-  res.json({
-    error: 'Twitch удалил API для подписки в 2023 году. Каждый бот-аккаунт должен подписаться на канал вручную через браузер.',
-    info: 'Войдите на twitch.tv под каждым ботом и нажмите ❤️ Follow на канале ' + readConfig().channel,
-  });
+// ── API ────────────────────────────────────────────────────────────────────────
+app.get('/api/transcript', (_req, res) => {
+  const log = manager?.getTranscriptLog() || [];
+  res.json(log.slice(-100));
 });
 
 app.get('/api/status', (_req, res) => {
   const cfg = readConfig();
-  res.json({
-    channel: cfg.channel, bots: cfg.bots.map(b => b.username),
-    started: isStarted, interval: cfg.interval,
-  });
+  res.json({ channel: cfg.channel, bots: cfg.bots.map(b => b.username), started: isStarted, interval: cfg.interval });
 });
 
-// ── Socket.IO ─────────────────────────────────────────────────────────────────
+// ── Socket.IO ──────────────────────────────────────────────────────────────────
 io.on('connection', socket => {
   console.log('[server] connected', socket.id);
   const cfg = readConfig();
@@ -122,9 +113,7 @@ io.on('connection', socket => {
 
   if (isStarted && startedBots.length > 0) {
     socket.emit('bots:started', { bots: startedBots });
-    startedBots.forEach(u =>
-      socket.emit('bot:status', { username: u, state: 'connected', message: 'Подключён' })
-    );
+    startedBots.forEach(u => socket.emit('bot:status', { username: u, state: 'connected', message: 'Подключён' }));
   }
 
   socket.on('send:manual', async (data: { targets: string[]; message: string }) => {
@@ -135,30 +124,31 @@ io.on('connection', socket => {
   socket.on('disconnect', () => console.log('[server] disconnected', socket.id));
 });
 
-// ── Auto-start ────────────────────────────────────────────────────────────────
+// ── Auto-start ─────────────────────────────────────────────────────────────────
 async function autoStart(): Promise<void> {
   const cfg = readConfig();
   console.log('[server] channel="' + cfg.channel + '" bots=' + cfg.bots.length +
     ' groq=' + (cfg.groqKey ? 'OK' : 'MISSING') + ' interval=' + cfg.interval + 's');
-  cfg.bots.forEach((b, i) => console.log('  bot' + (i + 1) + ': ' + b.username));
 
   if (!cfg.channel) { console.warn('[server] TWITCH_CHANNEL missing'); return; }
   if (!cfg.groqKey)  { console.warn('[server] GROQ_API_KEY missing'); return; }
   if (!cfg.bots.length) { console.warn('[server] No bots configured'); return; }
 
-  if (manager) await manager.stop();
-
-  // Build stream context for AI — include game/title if available
-  let context = cfg.context;
+  // Stop existing if running
+  if (manager) {
+    console.log('[server] stopping existing manager...');
+    await manager.stop();
+    manager = null;
+    isStarted = false;
+    startedBots = [];
+    // Wait a moment for clean disconnect
+    await new Promise(r => setTimeout(r, 2000));
+  }
 
   manager = new BotManager(
     cfg.bots, cfg.channel, cfg.groqKey,
-    {
-      interval: cfg.interval,
-      language: cfg.language,
-      context,
-      settings: { useEmoji: true, chatContext: true, uniquePersonas: true },
-    },
+    { interval: cfg.interval, language: cfg.language, context: cfg.context,
+      settings: { useEmoji: true, chatContext: true, uniquePersonas: true } },
     (event, data) => io.emit(event, data)
   );
 
@@ -166,22 +156,35 @@ async function autoStart(): Promise<void> {
   startedBots = manager.getUsernames();
   isStarted = true;
   io.emit('bots:started', { bots: startedBots });
-  console.log('[server] Started', startedBots.length, 'bots, interval=' + cfg.interval + 's');
+  console.log('[server] Started', startedBots.length, 'bots for #' + cfg.channel);
 
-  // Get stream info and update AI context
+  // Get stream info
   const info = await getStreamData(cfg.channel);
-  channelUserId = info.userId || null;
-  streamTitle = info.title || '';
-  console.log('[server] channel userId=' + channelUserId + ' live=' + info.live);
+  console.log('[server] stream live=' + info.live + ' viewers=' + info.viewers);
   io.emit('stream:info', { live: info.live, game: info.game, viewers: info.viewers, title: info.title });
   if (info.viewers != null) io.emit('stream:viewers', { viewers: info.viewers });
 
+  // Start viewer simulation if stream is live
+  if (info.live && cfg.viewerSim && appToken) {
+    const cid = process.env.TWITCH_CLIENT_ID?.trim() || '';
+    console.log('[server] Starting viewer simulation...');
+    manager.startViewerSimulation(cfg.channel, cid, appToken).catch(e =>
+      console.error('[server] viewer sim error:', e.message)
+    );
+  }
+
   if (streamPoll) clearInterval(streamPoll);
   streamPoll = setInterval(async () => {
+    if (!manager) return;
     const si = await getStreamData(cfg.channel);
-    if (si.userId && !channelUserId) channelUserId = si.userId;
-    io.emit('stream:info', { live: si.live, game: si.game, viewers: si.viewers, title: si.title });
+    io.emit('stream:info', { live: si.live, game: si.game, viewers: si.viewers });
     if (si.viewers != null) io.emit('stream:viewers', { viewers: si.viewers });
+
+    // Start viewer sim if just went live
+    if (si.live && cfg.viewerSim && appToken && manager) {
+      const cid = process.env.TWITCH_CLIENT_ID?.trim() || '';
+      manager.startViewerSimulation(cfg.channel, cid, appToken).catch(() => {});
+    }
   }, 30000);
 }
 

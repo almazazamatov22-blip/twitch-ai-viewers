@@ -74,7 +74,7 @@ export class AIService {
     let userPrompt: string;
 
     if (taggedMessage) {
-      system = custom ? custom.sys + '\nOutput ONLY the reply. Max 15 words.' :
+      system = custom ? custom.sys + '\nOutput ONLY the reply. Max 8 words.' :
         `You are a Twitch viewer. Write in ${lang}. 1-2 sentences max.`;
       userPrompt = `Reply to: "${taggedMessage}"`;
     } else {
@@ -85,7 +85,7 @@ export class AIService {
         'Write ONE short chat reaction to what the streamer said.',
         'Must be directly about what was transcribed.',
         'Match style and length of real viewer messages above.',
-        'Output ONLY the chat message. No quotes. No username. Max 15 words.',
+        'Output ONLY the chat message. Max 5-8 words. Short casual comment.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }
@@ -94,10 +94,10 @@ export class AIService {
     try {
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 60,
-        temperature: 0.88,
-        frequency_penalty: 1.2,
-        presence_penalty: 0.8,
+        max_tokens: 50,
+        temperature: 0.7,
+        frequency_penalty: 1.0,
+        presence_penalty: 0.5,
         messages: [
           { role: 'system', content: system },
           ...history.slice(-4),

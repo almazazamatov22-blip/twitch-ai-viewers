@@ -66,10 +66,15 @@ export class BotManager {
 
   async onTranscription(text: string): Promise<void> {
     if (this.stopped || !text.trim()) return;
+    // Skip some transcriptions randomly to make it more natural
+    if (Math.random() < 0.2) {
+      console.log('[bot] Skipping transcription (random)');
+      return;
+    }
     const allBots = Array.from(this.bots.values()).filter(b => b.connected);
     if (!allBots.length) return;
 
-    const count = Math.min(this.botsPerTranscript, allBots.length);
+    const count = Math.max(1, Math.min(this.botsPerTranscript, allBots.length) - (Math.random() < 0.3 ? 1 : 0));
     const responding: BotInstance[] = [];
     for (let i = 0; i < count; i++) {
       responding.push(allBots[(this.transcriptResponseIdx + i) % allBots.length]);
@@ -78,10 +83,10 @@ export class BotManager {
 
     for (let i = 0; i < responding.length; i++) {
       const bot = responding[i];
-      const delay = i * (1500 + Math.random() * 2000);
+      const delay = i * (4000 + Math.random() * 5000) + Math.random() * 3000;
       setTimeout(async () => {
         if (this.stopped || !bot.connected) return;
-        if (Date.now() - bot.lastMsgTime < 3000) return;
+if (Date.now() - bot.lastMsgTime < 5000) return;
         try {
           const msg = await this.ai.generateFromTranscription(
             bot.username, text, this.language, bot.index

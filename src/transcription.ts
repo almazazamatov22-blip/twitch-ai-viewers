@@ -15,7 +15,7 @@ export class TranscriptionService {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private tmpDir: string;
-  private chunkDuration = 30; // seconds of audio per chunk
+  private chunkDuration = 30;
 
   constructor(groqKey: string, channel: string) {
     this.groq = new Groq({ apiKey: groqKey });
@@ -30,7 +30,6 @@ export class TranscriptionService {
 
   private scheduleCapture(onTranscript: (result: TranscriptResult) => void): void {
     if (this.stopped) return;
-    // Run capture immediately, then every chunkDuration seconds
     this.captureAndTranscribe(onTranscript).finally(() => {
       if (!this.stopped) {
         this.timer = setTimeout(
@@ -44,7 +43,6 @@ export class TranscriptionService {
   private async captureAndTranscribe(onTranscript: (result: TranscriptResult) => void): Promise<void> {
     const audioFile = path.join(this.tmpDir, `twitchboost_${Date.now()}.mp3`);
     try {
-      // Get stream HLS URL via streamlink, pipe audio to ffmpeg
       const streamUrl = `https://twitch.tv/${this.channel}`;
       await this.captureAudio(streamUrl, audioFile);
 
@@ -66,9 +64,10 @@ export class TranscriptionService {
         response_format: 'text',
       });
 
-      const text = typeof transcription === 'string'
-        ? transcription.trim()
-        : (transcription as any).text?.trim() || '';
+      const rawText = typeof transcription === 'string'
+        ? transcription
+        : (transcription as any).text || '';
+      const text = rawText.trim();
 
       if (text && text.length > 5) {
         console.log('[transcription] Heard:', text.slice(0, 100));
@@ -83,7 +82,6 @@ export class TranscriptionService {
 
   private captureAudio(streamUrl: string, outputFile: string): Promise<void> {
     return new Promise((resolve) => {
-      // Use streamlink to get best audio quality stream, pipe to ffmpeg for audio extraction
       const cmd = [
         `streamlink --quiet "${streamUrl}" best --stdout`,
         `ffmpeg -i pipe:0 -t ${this.chunkDuration} -vn -ar 16000 -ac 1 -f mp3 "${outputFile}" -y 2>/dev/null`,
@@ -91,14 +89,12 @@ export class TranscriptionService {
 
       const proc = exec(cmd, { timeout: (this.chunkDuration + 15) * 1000 }, (err) => {
         if (err && err.code !== null && err.signal !== 'SIGTERM') {
-          // Try alternative: direct ffmpeg from HLS
           this.captureAudioFallback(streamUrl, outputFile).then(resolve).catch(() => resolve());
         } else {
           resolve();
         }
       });
 
-      // Kill after duration + buffer
       setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch { /* ignore */ }
       }, (this.chunkDuration + 10) * 1000);
@@ -106,7 +102,6 @@ export class TranscriptionService {
   }
 
   private async captureAudioFallback(streamUrl: string, outputFile: string): Promise<void> {
-    // Fallback: try to get M3U8 URL from streamlink and feed directly to ffmpeg
     return new Promise((resolve) => {
       exec(
         `streamlink --quiet "${streamUrl}" best --stream-url`,

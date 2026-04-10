@@ -32,12 +32,39 @@ export class AIService {
   private customPersonas = new Map<string, PersonaConfig>();
   public transcriptLog: TranscriptEntry[] = [];
 
-  constructor(apiKey: string, settings: Record<string, boolean> = {}, savedPersonas?: Record<string, PersonaConfig>) {
+  constructor(
+    apiKey: string, 
+    settings: Record<string, boolean> = {}, 
+    savedPersonas?: Record<string, PersonaConfig>,
+    savedHistories?: Record<string, { role: string; content: string; time: number }[]>,
+    savedTranscripts?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[],
+    savedRealChat?: { username: string; message: string; time: number }[]
+  ) {
     this.groq = new Groq({ apiKey });
     this.settings = settings;
     for (const [k, v] of Object.entries(BUILTIN)) this.customPersonas.set(k, v);
     if (savedPersonas) {
       for (const [k, v] of Object.entries(savedPersonas)) this.customPersonas.set(k.toLowerCase(), v);
+    }
+    // Load saved history
+    if (savedHistories) {
+      for (const [k, v] of Object.entries(savedHistories)) {
+        this.histories.set(k, v.map((m: any) => ({ role: m.role as 'user' | 'assistant', content: m.content })));
+      }
+    }
+    // Load saved transcript history
+    if (savedTranscripts) {
+      this.transcriptLog = savedTranscripts.map((t: any) => ({
+        heard: t.heard,
+        username: '',
+        message: t.responses?.[0]?.message || '',
+        persona: '',
+        timestamp: t.timestamp
+      }));
+    }
+    // Load saved real chat
+    if (savedRealChat) {
+      this.realChatSamples = savedRealChat.map((c: any) => c.username + ': ' + c.message);
     }
   }
 
@@ -49,6 +76,22 @@ export class AIService {
     const out: Record<string, PersonaConfig> = {};
     for (const [k, v] of this.customPersonas) out[k] = v;
     return out;
+  }
+  getHistoryForSave(): { histories: Record<string, { role: string; content: string; time: number }[]>; transcripts: any[]; realChat: any[] } {
+    const histories: Record<string, { role: string; content: string; time: number }[]> = {};
+    for (const [k, v] of this.histories) {
+      histories[k] = v.map(m => ({ role: m.role, content: m.content, time: Date.now() }));
+    }
+    const transcripts = this.transcriptLog.slice(-100).map(t => ({
+      heard: t.heard,
+      timestamp: t.timestamp,
+      responses: [{ username: t.username, message: t.message }]
+    }));
+    const realChat = this.realChatSamples.slice(-50).map(c => {
+      const idx = c.indexOf(': ');
+      return { username: c.slice(0, idx), message: c.slice(idx + 2), time: Date.now() };
+    });
+    return { histories, transcripts, realChat };
   }
   addRealMessage(displayName: string, message: string): void {
     this.realChatSamples.push(displayName + ': ' + message);

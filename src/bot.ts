@@ -44,6 +44,9 @@ export class BotManager {
       botsPerTranscript?: number;
       channelId?: string;
       clientId?: string;
+      savedHistory?: Record<string, { role: string; content: string; time: number }[]>;
+      savedTranscriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
+      savedRealChatHistory?: { username: string; message: string; time: number }[];
     },
     emit: EmitFn
   ) {
@@ -51,7 +54,7 @@ export class BotManager {
     this.language = opts.language;
     this.emit = emit;
     this.botsPerTranscript = opts.botsPerTranscript || 2;
-    this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas);
+    this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas, opts.savedHistory, opts.savedTranscriptHistory, opts.savedRealChatHistory);
 
     // Init points service if we have channel ID
     if (opts.channelId && opts.clientId) {
@@ -309,5 +312,8 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
     const out: Record<string, number | null> = {};
     for (const [k, b] of this.bots) out[k] = b.pointsBalance;
     return out;
+  }
+  getHistoryForSave(): { histories: Record<string, any[]>; transcripts: any[]; realChat: any[] } {
+    return this.ai.getHistoryForSave();
   }
 }

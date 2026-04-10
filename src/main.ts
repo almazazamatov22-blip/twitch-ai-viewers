@@ -37,6 +37,9 @@ interface SavedConfig {
   personas: Record<string, PersonaConfig>;
   phraseGroups: Record<string, string[]>;
   botsPerTranscript?: number;
+  botHistories?: Record<string, { role: string; content: string; time: number }[]>;
+  transcriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
+  realChatHistory?: { username: string; message: string; time: number }[];
 }
 
 function loadSaved(): SavedConfig {
@@ -206,11 +209,25 @@ async function autoStart(): Promise<void> {
       botsPerTranscript: saved.botsPerTranscript || 2,
       channelId: channelId || undefined,
       clientId: process.env.TWITCH_CLIENT_ID?.trim(),
+      savedHistory: saved.botHistories || {},
+      savedTranscriptHistory: saved.transcriptHistory || [],
+      savedRealChatHistory: saved.realChatHistory || [],
     },
     (event, data) => {
       io.emit(event, data);
       if (event === 'presence:active' && manager) io.emit('presence:update', manager.getPresenceStatus());
       if (event === 'points:balance') io.emit('points:all', manager?.getPointsBalances() || {});
+      
+      // Save history periodically
+      if (event === 'transcript:entry' || event === 'bot:message') {
+        const hist = manager?.getHistoryForSave();
+        if (hist) {
+          saved.botHistories = hist.histories;
+          saved.transcriptHistory = hist.transcripts;
+          saved.realChatHistory = hist.realChat;
+          // Debounced save will happen automatically when config changes
+        }
+      }
     }
   );
 
@@ -236,6 +253,18 @@ async function autoStart(): Promise<void> {
     io.emit('stream:info', { live: si.live, game: (si as any).game, viewers: (si as any).viewers });
     if ((si as any).viewers != null) io.emit('stream:viewers', { viewers: (si as any).viewers });
   }, 30000);
+
+  // Save history every 2 minutes
+  const historySaveInterval = setInterval(() => {
+    if (manager) {
+      const hist = manager.getHistoryForSave();
+      saved.botHistories = hist.histories;
+      saved.transcriptHistory = hist.transcripts;
+      saved.realChatHistory = hist.realChat;
+      console.log('[history] Saving, bots:', Object.keys(hist.histories).length, 'transcripts:', hist.transcripts.length);
+    }
+    saveToDisk(saved);
+  }, 120000);
 }
 
 http.listen(PORT, () => {
@@ -243,6 +272,14 @@ http.listen(PORT, () => {
   setTimeout(autoStart, 1500);
 });
 process.on('SIGTERM', async () => {
+  console.log('[server] Saving history before exit...');
+  if (manager) {
+    const hist = manager.getHistoryForSave();
+    saved.botHistories = hist.histories;
+    saved.transcriptHistory = hist.transcripts;
+    saved.realChatHistory = hist.realChat;
+    saveToDisk(saved);
+  }
   if (streamPoll) clearInterval(streamPoll);
   if (transcriber) transcriber.stop();
   if (manager) await manager.stop();

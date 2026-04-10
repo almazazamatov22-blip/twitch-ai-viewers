@@ -100,6 +100,7 @@ export class AIService {
   ): Promise<string> {
     const k = username.toLowerCase();
     const custom = this.customPersonas.get(k);
+    console.log('[ai] Generating for:', username, 'key:', k, 'has custom:', !!custom, 'sys:', custom?.sys?.slice(0, 30));
     const lang = custom ? '' : (language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English');
 
     const chatCtx = this.realChatSamples.length >= 3
@@ -117,7 +118,7 @@ export class AIService {
       system = [
         custom ? custom.sys : `You are a Twitch viewer. Write in ${lang}. Short reactions.`,
         `The streamer said: "${transcribedText}"` + (chatCtx ? '\n' + chatCtx : ''),
-        'Short statement. No dots.',
+        'Short comment. No dots. Dont repeat same phrases.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }
@@ -127,9 +128,9 @@ export class AIService {
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         max_tokens: 30,
-        temperature: 0.7,
+        temperature: 0.9,
         frequency_penalty: 1.5,
-        presence_penalty: 1.0,
+        presence_penalty: 2.0,
         messages: [
           { role: 'system', content: system },
           ...history.slice(-4),

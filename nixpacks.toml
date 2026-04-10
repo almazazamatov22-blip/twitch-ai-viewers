@@ -1,8 +1,8 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "python3", "ffmpeg"]
+nixPkgs = ["nodejs_20", "python311", "ffmpeg", "pipewire", "libva"]
 
 [phases.install]
-cmds = ["npm install --omit=dev"]
+cmds = ["pip install streamlink", "npm install --omit=dev"]
 
 [phases.build]
 cmds = ["npm run build"]

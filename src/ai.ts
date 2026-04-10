@@ -110,14 +110,14 @@ export class AIService {
     let userPrompt: string;
 
     if (taggedMessage) {
-      system = custom ? custom.sys + '\nNo punctuation. Only ? if question.' :
+      system = custom ? custom.sys + '\nShort statement.' :
         `You are a Twitch viewer. Write in ${lang}. 1-2 sentences max.`;
       userPrompt = `Reply to: "${taggedMessage}"`;
     } else {
       system = [
         custom ? custom.sys : `You are a Twitch viewer. Write in ${lang}. Short reactions.`,
         `The streamer said: "${transcribedText}"` + (chatCtx ? '\n' + chatCtx : ''),
-        'No punctuation. No dots, commas, exclamation. Only ? if question.',
+        'Short statement. No dots.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }

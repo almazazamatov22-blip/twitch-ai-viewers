@@ -25,7 +25,16 @@ const PORT = process.env.PORT || 3000;
 // ── Persistent storage ──────────────────────────────────────────────────────
 function getDataDir(): string {
   for (const d of ['/var/lib/twitch-boost', '/app/data', '/tmp/twitch-boost', path.join(__dirname, '../data')]) {
-    try { fs.mkdirSync(d, { recursive: true }); return d; } catch { /* try next */ }
+    try { 
+      fs.mkdirSync(d, { recursive: true }); 
+      // Test write
+      fs.writeFileSync(path.join(d, '.test'), 'test');
+      fs.unlinkSync(path.join(d, '.test'));
+      console.log('[config] Using data dir:', d);
+      return d; 
+    } catch (e: any) { 
+      console.log('[config] Cannot use:', d, e.message);
+    }
   }
   return '/tmp';
 }
@@ -44,13 +53,17 @@ interface SavedConfig {
 
 function loadSaved(channel: string): SavedConfig {
   const file = CONFIG_FILE(channel);
-  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8')); }
+  try { if (fs.existsSync(file)) {
+    const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
+    console.log('[config] Loaded from:', file, 'personas:', Object.keys(data.personas || {}).length);
+    return data;
+  }}
   catch (e: any) { console.warn('[config] load error:', e.message); }
   return { personas: {}, phraseGroups: {} };
 }
 function saveToDisk(data: SavedConfig, channel: string): void {
   const file = CONFIG_FILE(channel);
-  try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
+  try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); console.log('[config] Saved to:', file); }
   catch (e: any) { console.error('[config] save error:', e.message); }
 }
 
@@ -132,7 +145,7 @@ let channelId: string | null = null;
 function loadConfigForChannel(channel: string): SavedConfig {
   currentChannel = channel;
   saved = loadSaved(channel);
-  console.log('[config] Loaded for channel:', channel, 'personas:', Object.keys(saved.personas).length);
+  console.log('[config] Loaded for channel:', channel, 'personas:', Object.keys(saved.personas).length, 'phrases:', Object.keys(saved.phraseGroups).length);
   return saved;
 }
 

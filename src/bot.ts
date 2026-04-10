@@ -78,10 +78,10 @@ export class BotManager {
 
     for (let i = 0; i < responding.length; i++) {
       const bot = responding[i];
-      const delay = i * (3000 + Math.random() * 5000);
+      const delay = i * (1500 + Math.random() * 2000);
       setTimeout(async () => {
         if (this.stopped || !bot.connected) return;
-        if (Date.now() - bot.lastMsgTime < 5000) return;
+        if (Date.now() - bot.lastMsgTime < 3000) return;
         try {
           const msg = await this.ai.generateFromTranscription(
             bot.username, text, this.language, bot.index
@@ -134,7 +134,7 @@ export class BotManager {
         for (const [botKey, bot] of this.bots) {
           if (!bot.connected) continue;
           if (message.toLowerCase().includes('@' + botKey) || message.toLowerCase().includes('@' + bot.username.toLowerCase())) {
-            setTimeout(() => { if (!this.stopped) this.sendTagReply(bot, message); }, 1500 + Math.random() * 2500);
+            setTimeout(() => { if (!this.stopped) this.sendTagReply(bot, message); }, 500 + Math.random() * 1000);
           }
         }
       }
@@ -258,7 +258,7 @@ export class BotManager {
     bot.presenceInterval = setInterval(() => {
       if (this.stopped || !bot.connected) { if (bot.presenceInterval) clearInterval(bot.presenceInterval); return; }
       poll();
-    }, 20000);
+    }, 15000);
   }
 
   async sendManual(usernames: string[], message: string): Promise<void> {

@@ -15,9 +15,9 @@ export class TranscriptionService {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private tmpDir: string;
-  private chunkDuration = 25; // seconds per chunk
-  private offlineRetryMs = 60000; // retry every 60s when offline
-  private onlineRetryMs = 28000;  // retry every 28s when online
+  private chunkDuration = 25;
+  private offlineRetryMs = 45000;
+  private onlineRetryMs = 18000;
 
   constructor(groqKey: string, channel: string) {
     this.groq = new Groq({ apiKey: groqKey });
@@ -27,10 +27,9 @@ export class TranscriptionService {
   }
 
   private checkDeps(): void {
-    exec('which streamlink || streamlink --version', (err, stdout, stderr) => {
+    exec('which streamlink || streamlink --version', (err, stdout) => {
       if (err) {
         console.error('[transcription] streamlink NOT FOUND:', err.message);
-        console.error('[transcription] stderr:', stderr);
         console.log('[transcription] Trying: pip3 install streamlink --break-system-packages');
         exec('pip3 install streamlink --break-system-packages 2>&1', (_e, out) => {
           console.log('[transcription] pip install result:', out?.slice(0, 200));
@@ -100,7 +99,7 @@ export class TranscriptionService {
         return true;
       } else {
         console.log('[transcription] Empty transcription result');
-        return true; // stream was online, just quiet
+        return true;
       }
     } catch (e: any) {
       console.error('[transcription] Error:', e.message);
@@ -115,12 +114,11 @@ export class TranscriptionService {
       const streamUrl = `https://twitch.tv/${this.channel}`;
       console.log('[transcription] Capturing audio from', streamUrl, 'for', this.chunkDuration, 's...');
 
-      // Use spawn for proper piping: streamlink stdout → ffmpeg stdin
       const streamlink = spawn('streamlink', [
         '--quiet',
         '--twitch-low-latency',
         streamUrl,
-        'audio_only,worst',  // prefer audio-only, fallback to worst
+        'audio_only,worst',
         '--stdout',
       ], { timeout: (this.chunkDuration + 15) * 1000 });
 
@@ -136,25 +134,18 @@ export class TranscriptionService {
       ]);
 
       let streamlinkErr = '';
-      let ffmpegErr = '';
       let streamlinkDone = false;
       let ffmpegDone = false;
       let timedOut = false;
 
-      // Pipe streamlink → ffmpeg
       streamlink.stdout.pipe(ffmpeg.stdin);
 
       streamlink.stderr.on('data', (d: Buffer) => {
         const s = d.toString();
         streamlinkErr += s;
-        // Log important errors but not every line
         if (s.includes('error') || s.includes('Error') || s.includes('offline') || s.includes('No playable')) {
           console.log('[streamlink]', s.trim().slice(0, 200));
         }
-      });
-
-      ffmpeg.stderr.on('data', (d: Buffer) => {
-        ffmpegErr += d.toString();
       });
 
       const timeout = setTimeout(() => {
@@ -167,7 +158,6 @@ export class TranscriptionService {
       const check = () => {
         if (streamlinkDone && ffmpegDone) {
           clearTimeout(timeout);
-          // Check if we got an offline error
           const isOffline = streamlinkErr.includes('No playable streams') ||
                             streamlinkErr.includes('No streams') ||
                             streamlinkErr.includes('offline') ||
@@ -176,7 +166,6 @@ export class TranscriptionService {
             console.log('[transcription] Stream is offline');
             resolve(false);
           } else if (timedOut) {
-            // Timeout is OK — we captured chunkDuration seconds of audio
             resolve(true);
           } else {
             resolve(true);
@@ -192,7 +181,6 @@ export class TranscriptionService {
             console.log('[streamlink] stderr:', streamlinkErr.slice(0, 300));
           }
         }
-        // Signal end of input to ffmpeg
         try { ffmpeg.stdin.end(); } catch { /* ignore */ }
         check();
       });
@@ -201,9 +189,6 @@ export class TranscriptionService {
         ffmpegDone = true;
         if (code !== 0 && code !== null && !timedOut) {
           console.log('[ffmpeg] exited with code', code);
-          if (ffmpegErr.includes('Invalid') || ffmpegErr.includes('Error')) {
-            console.log('[ffmpeg] error:', ffmpegErr.slice(-200));
-          }
         }
         check();
       });

@@ -8,7 +8,7 @@
     "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "build": "tsc && npm run build:fe",
     "build:fe": "cd frontend && npm install && npm run build",
-    "start": "node dist/main.js",
+    "start": "ts-node src/main.ts",
     "postinstall": "pip install streamlink --break-system-packages || pip3 install streamlink --break-system-packages || true"
   },
   "dependencies": {

@@ -2,7 +2,10 @@
 nixPkgs = ["nodejs_20", "python3", "ffmpeg"]
 
 [phases.install]
-cmds = ["npm install"]
+cmds = ["npm install --omit=dev"]
 
 [phases.build]
 cmds = ["npm run build"]
+
+[phases.start]
+cmd = ["npm run start"]

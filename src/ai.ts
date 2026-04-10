@@ -110,14 +110,14 @@ export class AIService {
     let userPrompt: string;
 
     if (taggedMessage) {
-      system = custom ? custom.sys + '\nUse punctuation. dots and commas ok.' :
+      system = custom ? custom.sys + '\nNo punctuation. Only ? if question.' :
         `You are a Twitch viewer. Write in ${lang}. 1-2 sentences max.`;
       userPrompt = `Reply to: "${taggedMessage}"`;
     } else {
       system = [
         custom ? custom.sys : `You are a Twitch viewer. Write in ${lang}. Short reactions.`,
         `The streamer said: "${transcribedText}"` + (chatCtx ? '\n' + chatCtx : ''),
-        'Use punctuation. dots, commas and exclamation ok. ? only if question.',
+        'No punctuation. No dots, commas, exclamation. Only ? if question.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }
@@ -138,7 +138,8 @@ export class AIService {
       });
       const raw = (res.choices[0]?.message?.content || '').trim()
         .replace(/^["'`*_]+|["'`*_]+$/g, '').replace(/^\w+:\s*/, '').trim()
-        .replace(/!{2,}/g, '!').replace(/\?{2,}/g, '?').replace(/\.{3,}/g, '...').trim();
+        .replace(/!+/g, '').replace(/\.+/g, '').replace(/,+/g, ' ').replace(/:+/g, '').replace(/\?+/g, (m) => m.length > 1 ? '?' : m)
+        .replace(/\s+/g, ' ').trim();
       if (!raw || raw.length < 2) return '';
       const updated: Msg[] = [...history,
         { role: 'user' as const, content: userPrompt },

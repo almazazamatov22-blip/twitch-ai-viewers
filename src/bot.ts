@@ -86,7 +86,7 @@ export class BotManager {
 
     for (let i = 0; i < responding.length; i++) {
       const bot = responding[i];
-      const delay = i * (4000 + Math.random() * 5000) + Math.random() * 3000;
+      const delay = i * (5000 + Math.random() * 5000) + Math.random() * 5000;
       setTimeout(async () => {
         if (this.stopped || !bot.connected) return;
 if (Date.now() - bot.lastMsgTime < 5000) return;

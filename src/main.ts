@@ -30,7 +30,7 @@ function getDataDir(): string {
   return '/tmp';
 }
 const DATA_DIR = getDataDir();
-const CONFIG_FILE = path.join(DATA_DIR, 'saved-config.json');
+const CONFIG_FILE = (channel: string) => path.join(DATA_DIR, `config-${channel}.json`);
 console.log('[config] data dir:', DATA_DIR);
 
 interface SavedConfig {
@@ -42,13 +42,15 @@ interface SavedConfig {
   realChatHistory?: { username: string; message: string; time: number }[];
 }
 
-function loadSaved(): SavedConfig {
-  try { if (fs.existsSync(CONFIG_FILE)) return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf-8')); }
+function loadSaved(channel: string): SavedConfig {
+  const file = CONFIG_FILE(channel);
+  try { if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf-8')); }
   catch (e: any) { console.warn('[config] load error:', e.message); }
   return { personas: {}, phraseGroups: {} };
 }
-function saveToDisk(data: SavedConfig): void {
-  try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2)); }
+function saveToDisk(data: SavedConfig, channel: string): void {
+  const file = CONFIG_FILE(channel);
+  try { fs.writeFileSync(file, JSON.stringify(data, null, 2)); }
   catch (e: any) { console.error('[config] save error:', e.message); }
 }
 
@@ -120,11 +122,19 @@ async function getStreamData(channel: string): Promise<{ live: boolean; viewers?
 let manager: BotManager | null = null;
 let transcriber: TranscriptionService | null = null;
 let streamPoll: NodeJS.Timeout | null = null;
+let historySaveInterval: NodeJS.Timeout | null = null;
 let startedBots: string[] = [];
 let isStarted = false;
-let saved = loadSaved();
+let currentChannel = '';
+let saved: SavedConfig = { personas: {}, phraseGroups: {} };
 let channelId: string | null = null;
-console.log('[config] personas:', Object.keys(saved.personas).join(', ') || 'none');
+
+function loadConfigForChannel(channel: string): SavedConfig {
+  currentChannel = channel;
+  saved = loadSaved(channel);
+  console.log('[config] Loaded for channel:', channel, 'personas:', Object.keys(saved.personas).length);
+  return saved;
+}
 
 // ── REST ────────────────────────────────────────────────────────────────────
 app.get('/api/transcript', (_req, res) => res.json(manager?.getTranscriptLog()?.slice(-100) || []));
@@ -159,21 +169,21 @@ io.on('connection', socket => {
   });
   socket.on('set:persona', (data: { username: string; role: string; sys: string }) => {
     const k = data.username.toLowerCase(), cfg2: PersonaConfig = { role: data.role, sys: data.sys };
-    saved.personas[k] = cfg2; saveToDisk(saved);
+    saved.personas[k] = cfg2; saveToDisk(saved, currentChannel);
     if (manager) manager.setPersona(data.username, cfg2);
     io.emit('personas:update', saved.personas);
     socket.emit('persona:saved', { username: data.username, ok: true });
   });
   socket.on('del:persona', (data: { username: string }) => {
-    delete saved.personas[data.username.toLowerCase()]; saveToDisk(saved);
+    delete saved.personas[data.username.toLowerCase()]; saveToDisk(saved, currentChannel);
     io.emit('personas:update', saved.personas);
   });
   socket.on('set:phrases', (data: Record<string, string[]>) => {
-    saved.phraseGroups = data; saveToDisk(saved); io.emit('phrases:update', saved.phraseGroups);
+    saved.phraseGroups = data; saveToDisk(saved, currentChannel); io.emit('phrases:update', saved.phraseGroups);
   });
   socket.on('set:bots_per_transcript', (data: { n: number }) => {
     const n = Math.max(1, parseInt(String(data.n)) || 2);
-    saved.botsPerTranscript = n; saveToDisk(saved);
+    saved.botsPerTranscript = n; saveToDisk(saved, currentChannel);
     if (manager) manager.setBotsPerTranscript(n);
     io.emit('config', { botsPerTranscript: n });
   });
@@ -191,6 +201,9 @@ async function autoStart(): Promise<void> {
   const cfg = readEnvConfig();
   console.log('[server] channel="' + cfg.channel + '" bots=' + cfg.bots.length + ' groq=' + (cfg.groqKey ? 'OK' : 'MISSING'));
   if (!cfg.channel || !cfg.groqKey || !cfg.bots.length) { console.warn('[server] missing config'); return; }
+  
+  // Load config for this specific channel
+  loadConfigForChannel(cfg.channel);
 
   if (manager) { await manager.stop(); manager = null; }
   if (transcriber) { transcriber.stop(); transcriber = null; }
@@ -263,7 +276,7 @@ async function autoStart(): Promise<void> {
       saved.realChatHistory = hist.realChat;
       console.log('[history] Saving, bots:', Object.keys(hist.histories).length, 'transcripts:', hist.transcripts.length);
     }
-    saveToDisk(saved);
+    saveToDisk(saved, currentChannel);
   }, 120000);
 }
 
@@ -278,7 +291,7 @@ process.on('SIGTERM', async () => {
     saved.botHistories = hist.histories;
     saved.transcriptHistory = hist.transcripts;
     saved.realChatHistory = hist.realChat;
-    saveToDisk(saved);
+    saveToDisk(saved, currentChannel);
   }
   if (streamPoll) clearInterval(streamPoll);
   if (transcriber) transcriber.stop();

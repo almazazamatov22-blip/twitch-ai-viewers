@@ -15,9 +15,9 @@ export class TranscriptionService {
   private timer: NodeJS.Timeout | null = null;
   private stopped = false;
   private tmpDir: string;
-  private chunkDuration = 25;
+  private chunkDuration = 30;
   private offlineRetryMs = 45000;
-  private onlineRetryMs = 18000;
+  private onlineRetryMs = 30000;
 
   constructor(groqKey: string, channel: string) {
     this.groq = new Groq({ apiKey: groqKey });

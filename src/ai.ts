@@ -15,38 +15,7 @@ export interface TranscriptEntry {
 
 interface Msg { role: 'user' | 'assistant'; content: string; }
 
-const BUILTIN: Record<string, PersonaConfig> = {
-  'olegzhoskii': {
-    role: 'ukrainian_teen',
-    sys: `Ти 15-річний українець. Без крапок і ком. Тільки українська.
-Пиши коротко 3-6 слів. Емоції: лол, ахах, топ, бро, кейси.
-Не описуй що робить стример. Просто реагуй.`,
-  },
-  'chill_dude': {
-    role: 'chill',
-    sys: `Ти звичайний чувак у чаті. Без крапок.
-Пиши як в чаті 3-5 слів. Лол, ахах, ок, да.
-Просто емоція на те що чуєш.`,
-  },
-  'hype_guy': {
-    role: 'hype',
-    sys: `Ти фанат який хайпає. Без крапок.
-Пиши коротко 2-4 слова. ЄЄЄ, ГОЄ, ЛЕТС ГО, топ.
-Емоційна підтримка.`,
-  },
-  'silent_obs': {
-    role: 'observer',
-    sys: `Ти тихий чувак який спостерігає. Майже не пиши.
-1-3 слова максимум. Лол, ахах, ок.
-Короткі реакції.`,
-  },
-  'ru_chat': {
-    role: 'ru viewer',
-    sys: `Ти звичайний російський глядач. Без знаків.
-Пиши як в чаті твіча 2-5 слів. Лол, ахах, да, ок.
-Просто реакція`,
-  },
-};
+const BUILTIN: Record<string, PersonaConfig> = {};
 
 export class AIService {
   private groq: Groq;
@@ -141,16 +110,14 @@ export class AIService {
     let userPrompt: string;
 
     if (taggedMessage) {
-      system = custom ? custom.sys + '\nБез крапок. 2-5 слів.' :
+      system = custom ? custom.sys + '\nShort reply. No dots.' :
         `You are a Twitch viewer. Write in ${lang}. 1-2 sentences max.`;
       userPrompt = `Reply to: "${taggedMessage}"`;
     } else {
       system = [
-        custom ? custom.sys : `Ти звичайний глядач. Без крапок і знаків. 2-5 слів.
-Пиши як в чаті твіча: лол, ахах, топ, да, ок.
- ${lang !== 'ru' && lang !== 'uk' ? 'English only.' : ''}`,
-        `Що сказав стример: "${transcribedText}"` + (chatCtx ? '\n' + chatCtx : ''),
-        'Коротка реакція. Без крапок. 2-5 слів.',
+        custom ? custom.sys : `You are a Twitch viewer. Write in ${lang}. Short reactions.`,
+        `The streamer said: "${transcribedText}"` + (chatCtx ? '\n' + chatCtx : ''),
+        'Short response. 2-5 words. Like chat emoji.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }

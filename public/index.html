@@ -135,6 +135,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
 .ain-s{font-size:10px;color:var(--tx3);margin-top:1px}
 .ain-p{font-size:10px;color:var(--pl);margin-top:1px;font-style:italic}
 .ain-pres{font-size:10px;margin-top:1px;display:flex;align-items:center;gap:3px}
+.ain-pts{font-size:10px;margin-top:1px;color:var(--yw);font-family:monospace;min-height:14px}
+.claim-btn{padding:5px 10px;background:linear-gradient(135deg,#f59e0b,#d97706);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:11px;font-weight:600;font-family:inherit;white-space:nowrap}
+.claim-btn:hover{opacity:.85}
 .air{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
 .adot{width:7px;height:7px;border-radius:50%;background:var(--tx3)}
 .adot.on{background:var(--gr);box-shadow:0 0 5px var(--gr)}
@@ -306,8 +309,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
       <div class="presence-info">
         👁 <b>Присутствие 100%</b> — каждый бот смотрит стрим как залогиненный пользователь через свой токен. Баллы канала накапливаются автоматически.
       </div>
-      <div style="margin-bottom:5px">
-        <a class="nb" id="tw-link" href="#" target="_blank" style="width:100%;justify-content:center">↗ Открыть канал</a>
+      <div style="margin-bottom:5px;display:flex;gap:5px">
+        <a class="nb" id="tw-link" href="#" target="_blank" style="flex:1;justify-content:center">↗ Открыть канал</a>
+        <button class="claim-btn" onclick="claimPoints()">🎁 Баллы</button>
       </div>
       <div class="asrch">
         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--tx3);flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
@@ -452,7 +456,7 @@ socket.on('bots:started', d => {
 
 socket.on('bot:status', d=>{
   const k=d.username.toLowerCase();
-  if(!bots[k]) bots[k]={display:d.username,state:d.state,msgs:0,sel:true,presence:false};
+  if(!bots[k]) bots[k]={display:d.username,state:d.state,msgs:0,sel:true,presence:false,points:null};
   else { bots[k].state=d.state; bots[k].display=d.username; }
   updDot(k,d.state,d.message);
 });
@@ -603,6 +607,7 @@ function renderAcc(filter=''){
         <div class="ain-n">${esc(name)}</div>
         <div class="ain-s" id="aisub-${k}">${b.state}</div>
         <div class="ain-p" id="ainp-${k}">🧠 ${esc(p?p.role:'не задана')}</div>
+        <div class="ain-pts" id="pts-${k}">${b.points!=null?'🪙 '+b.points.toLocaleString()+' pts':''}</div>
         <div class="ain-pres"><span class="sdot ${b.presence?'watch':''}" id="pdot-${k}" style="width:6px;height:6px"></span><span style="font-size:10px;color:${b.presence?'var(--yw)':'var(--tx3)'}"> ${b.presence?'смотрит стрим':'ожидание стрима'}</span></div>
       </div>
       <div class="air">
@@ -778,6 +783,27 @@ function switchTab(tab,btn){
   if(tab==='accounts'){pl.style.display='none';pc.style.display='none';pr.style.width='100%';}
   else if(tab==='phrases'){pl.style.display='none';pc.style.display='none';pr.style.display='none';pp.style.display='flex';renderPGPage();}
   else if(tab==='transcript'){pl.style.display='none';pc.style.display='none';pr.style.display='none';tp.style.display='flex';renderTranscriptPage();}
+}
+
+socket.on('points:all', data=>{
+  if(!data) return;
+  Object.keys(data).forEach(k=>{
+    if(bots[k]) bots[k].points=data[k];
+    const el=document.getElementById('pts-'+k);
+    if(el&&data[k]!=null) el.textContent='🪙 '+data[k].toLocaleString()+' pts';
+  });
+});
+socket.on('points:balance', d=>{
+  const k=d.username.toLowerCase();
+  if(bots[k]) bots[k].points=d.balance;
+  const el=document.getElementById('pts-'+k);
+  if(el&&d.balance!=null) el.textContent='🪙 '+d.balance.toLocaleString()+' pts';
+});
+socket.on('points:claimed_all', ()=>toast('ok','🎁 Баллы собраны!'));
+
+async function claimPoints(){
+  socket.emit('claim:points');
+  toast('info','🎁 Собираю бонусные баллы...');
 }
 
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}

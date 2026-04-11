@@ -18,6 +18,21 @@ const FE_DIST = path.join(__dirname, '../frontend/dist');
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(express.static(FE_DIST));
 app.get('/health', (_req, res) => res.json({ ok: true }));
+app.get('/api/learn', (_req, res) => {
+  if (learnBot) {
+    res.json(learnBot.getData());
+  } else {
+    res.json({ messages: 0, words: 0, uniqueWords: 0 });
+  }
+});
+app.get('/api/learn/download', (_req, res) => {
+  const p = getLearnDataPath();
+  if (fs.existsSync(p)) {
+    res.download(p, 'markov-chain.json');
+  } else {
+    res.status(404).json({ error: 'No saved data' });
+  }
+});
 app.get('*', (_req, res) => {
   res.sendFile(path.join(FE_DIST, 'index.html'));
 });

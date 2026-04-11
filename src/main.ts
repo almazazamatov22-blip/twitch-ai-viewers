@@ -150,6 +150,11 @@ async function getStreamData(channel: string): Promise<{ live: boolean; viewers?
 let manager: BotManager | null = null;
 let transcriber: TranscriptionService | null = null;
 let learnBot: LearnBot | null = null;
+let learnBot2: LearnBot | null = null;
+let learnBot3: LearnBot | null = null;
+let learnBot4: LearnBot | null = null;
+let learnBot5: LearnBot | null = null;
+let learnBot6: LearnBot | null = null;
 let streamPoll: NodeJS.Timeout | null = null;
 let historySaveInterval: NodeJS.Timeout | null = null;
 let startedBots: string[] = [];
@@ -226,23 +231,38 @@ io.on('connection', socket => {
       socket.emit('learn:error', { message: 'Настройте LEARN_CHANNEL и добавьте ботов BOT1_OAUTH итд' });
       return;
     }
-    if (learnBot) learnBot.stop();
-    learnBot = new LearnBot((event, d) => io.emit(event, d));
     
-    // Use first bot for learning
+    // Stop existing learners
+    if (learnBot) learnBot.stop();
+    if (learnBot2) learnBot2.stop();
+    if (learnBot3) learnBot3.stop();
+    if (learnBot4) learnBot4.stop();
+    if (learnBot5) learnBot5.stop();
+    if (learnBot6) learnBot6.stop();
+    
+    // Start multiple bots for learning
     try {
-      await learnBot.start(config.channel, config.tokens[0]);
+      if (config.tokens[0]) { learnBot = new LearnBot((e, d) => io.emit(e, d)); await learnBot.start(config.channel, config.tokens[0]); }
+      if (config.tokens[1]) { learnBot2 = new LearnBot((e, d) => io.emit(e, d)); await learnBot2.start(config.channel, config.tokens[1]); }
+      if (config.tokens[2]) { learnBot3 = new LearnBot((e, d) => io.emit(e, d)); await learnBot3.start(config.channel, config.tokens[2]); }
+      if (config.tokens[3]) { learnBot4 = new LearnBot((e, d) => io.emit(e, d)); await learnBot4.start(config.channel, config.tokens[3]); }
+      if (config.tokens[4]) { learnBot5 = new LearnBot((e, d) => io.emit(e, d)); await learnBot5.start(config.channel, config.tokens[4]); }
+      if (config.tokens[5]) { learnBot6 = new LearnBot((e, d) => io.emit(e, d)); await learnBot6.start(config.channel, config.tokens[5]); }
       socket.emit('learn:started', { ok: true });
+      io.emit('learn:log', `Запущено ${config.tokens.length} ботов для обучения`);
     } catch (e: any) {
       socket.emit('learn:error', { message: e.message });
     }
   });
   
   socket.on('learn:stop', () => {
-    if (learnBot) {
-      learnBot.stop();
-      learnBot = null;
-    }
+    if (learnBot) { learnBot.stop(); learnBot = null; }
+    if (learnBot2) { learnBot2.stop(); learnBot2 = null; }
+    if (learnBot3) { learnBot3.stop(); learnBot3 = null; }
+    if (learnBot4) { learnBot4.stop(); learnBot4 = null; }
+    if (learnBot5) { learnBot5.stop(); learnBot5 = null; }
+    if (learnBot6) { learnBot6.stop(); learnBot6 = null; }
+    io.emit('learn:log', 'Обучение остановлено');
   });
   socket.on('get:personas', () => socket.emit('personas:update', saved.personas));
   socket.on('get:phrases',  () => socket.emit('phrases:update', saved.phraseGroups));

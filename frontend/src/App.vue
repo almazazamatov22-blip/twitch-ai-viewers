@@ -1,4 +1,5 @@
 <script setup>
+// Learn tab added
 import { ref, reactive, onMounted, computed, h } from 'vue'
 import { 
   NConfigProvider, NLayout, NLayoutSider, NLayoutContent, NMenu, 

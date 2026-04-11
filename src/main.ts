@@ -19,10 +19,20 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.use(express.static(FE_DIST));
 app.get('/health', (_req, res) => res.json({ ok: true }));
 app.get('/debug', (_req, res) => {
+  const gistIdPath = path.join(DATA_DIR, 'gist-id.txt');
+  let savedGistId = '';
+  try {
+    if (fs.existsSync(gistIdPath)) {
+      savedGistId = fs.readFileSync(gistIdPath, 'utf-8').trim();
+    }
+  } catch {}
+  
   res.json({
     hasGitHubToken: !!GITHUB_TOKEN,
+    tokenLength: GITHUB_TOKEN?.length || 0,
     hasGistId: !!MARKOV_GIST_ID,
     gistId: MARKOV_GIST_ID || 'not set',
+    savedGistId: savedGistId || 'no saved',
     learnBotExists: !!learnBot,
   });
 });

@@ -516,12 +516,22 @@ io.on('connection', socket => {
     }
   });
 
-  socket.on('learn:save', () => {
+  socket.on('learn:save', async () => {
     if (learnBot) {
+      // Save locally
       const filepath = path.join(DATA_DIR, 'markov-' + Date.now() + '.json');
       const data = learnBot.getData();
       fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
-      io.emit('learn:log', 'Сохранено: ' + path.basename(filepath));
+      io.emit('learn:log', 'Сохранено локально: ' + path.basename(filepath));
+      
+      // Save to GitHub
+      console.log('[github] Manual save to GitHub...');
+      const ok = await saveToGitHub(data);
+      if (ok) {
+        io.emit('learn:log', '✅ Сохранено в GitHub Gist');
+      } else {
+        io.emit('learn:log', '❌ Ошибка сохранения в GitHub');
+      }
     }
   });
   

@@ -40,6 +40,27 @@ const manualMessage = ref('')
 const replyingTo = ref(null)
 const currentTranscript = ref('')
 const transcriptHistory = reactive([])
+const learnChannel = ref('')
+const learnOAuth = ref('')
+const learning = ref(false)
+const learnStats = reactive({ messages: 0, words: 0 })
+const learnLogs = reactive([])
+
+function startLearning() {
+  if (!learnChannel.value || !learnOAuth.value) return
+  learning.value = true
+  learnStats.messages = 0
+  learnStats.words = 0
+  learnLogs.length = 0
+  learnLogs.push(`Подключение к ${learnChannel.value}...`)
+  socket.value.emit('learn:start', { channel: learnChannel.value, token: learnOAuth.value })
+}
+
+function stopLearning() {
+  learning.value = false
+  socket.value.emit('learn:stop')
+  learnLogs.push('Обучение остановлено')
+}
 
 const COLORS = ['#7c3aed', '#2563eb', '#059669', '#d97706', '#dc2626', '#0891b2', '#9333ea', '#c2410c']
 const colorMap = new Map()
@@ -55,6 +76,7 @@ const menuOptions = computed(() => [
   { label: 'Аккаунты', key: 'accounts', icon: () => h(NIcon, null, { default: () => h(People) }) },
   { label: 'Фразы', key: 'phrases', icon: () => h(NIcon, null, { default: () => h(ColorPalette) }) },
   { label: 'Транскрипция', key: 'transcript', icon: () => h(NIcon, null, { default: () => h(Mic) }) },
+  { label: 'Обучение', key: 'learn', icon: () => h(NIcon, null, { default: () => h(SettingsIcon) }) },
 ])
 
 function esc(s) {
@@ -158,6 +180,17 @@ onMounted(() => {
 
   s.on('phrases:update', data => {
     if (data && Object.keys(data).length) Object.assign(phrases, data)
+  })
+  
+  s.on('learn:status', data => {
+    learning.value = data.running
+    learnStats.messages = data.messages
+    learnStats.words = data.words
+  })
+  
+  s.on('learn:log', msg => {
+    learnLogs.unshift(msg)
+    if (learnLogs.length > 50) learnLogs.pop()
   })
 })
 
@@ -416,6 +449,46 @@ const themeOverrides = {
                       <div v-if="!sess.responses.length" class="no-responses">Боты ещё не ответили...</div>
                     </n-card>
                   </n-scrollbar>
+                </div>
+              </template>
+              
+              <template v-else-if="activeKey === 'learn'">
+                <div class="learn-panel">
+                  <div class="learn-header">
+                    <n-alert type="info">
+                      🤖 <b>Обучение Markov</b> — боты обучаются на сообщениях из другого канала пока вы стримите
+                    </n-alert>
+                  </div>
+                  
+                  <n-card title="Настройка обучения">
+                    <n-form>
+                      <n-form-item label="Канал для обучения">
+                        <n-input v-model:value="learnChannel" placeholder="Например: xqc" />
+                      </n-form-item>
+                      <n-form-item label="OAuth токен бота (для обучения)">
+                        <n-input v-model:value="learnOAuth" placeholder="oauth:xxxx" type="password" />
+                      </n-form-item>
+                      <n-space>
+                        <n-button type="primary" @click="startLearning">Начать обучение</n-button>
+                        <n-button type="error" @click="stopLearning" :disabled="!learning">Стоп</n-button>
+                      </n-space>
+                    </n-form>
+                  </n-card>
+                  
+                  <n-card v-if="learning" title="Статус обучения">
+                    <div class="learn-stats">
+                      <n-statistic label="Сообщений изучено">{{ learnStats.messages }}</n-statistic>
+                      <n-statistic label="Слов в базе">{{ learnStats.words }}</n-statistic>
+                    </div>
+                    <n-divider />
+                    <div class="learn-log">
+                      <n-scrollbar style="max-height: 200px">
+                        <div v-for="(msg, idx) in learnLogs" :key="idx" class="learn-msg">
+                          {{ msg }}
+                        </div>
+                      </n-scrollbar>
+                    </div>
+                  </n-card>
                 </div>
               </template>
             </div>
@@ -727,8 +800,27 @@ body {
   margin-bottom: 10px;
 }
 
-.transcript-panel {
+.transcript-panel,
+.learn-panel {
   padding: 16px;
+}
+
+.learn-header {
+  margin-bottom: 16px;
+}
+
+.learn-stats {
+  display: flex;
+  gap: 24px;
+}
+
+.learn-log {
+  font-size: 11px;
+  font-family: monospace;
+}
+
+.learn-msg {
+  padding: 2px 0;
 }
 
 .transcript-header {

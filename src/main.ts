@@ -8,6 +8,7 @@ import axios from 'axios';
 import { BotManager } from './bot';
 import { PersonaConfig } from './ai';
 import { TranscriptionService } from './transcription';
+import { LearnBot } from './learn';
 
 const app = express();
 const http = createServer(app);
@@ -134,6 +135,7 @@ async function getStreamData(channel: string): Promise<{ live: boolean; viewers?
 // ── State ───────────────────────────────────────────────────────────────────
 let manager: BotManager | null = null;
 let transcriber: TranscriptionService | null = null;
+let learnBot: LearnBot | null = null;
 let streamPoll: NodeJS.Timeout | null = null;
 let historySaveInterval: NodeJS.Timeout | null = null;
 let startedBots: string[] = [];
@@ -202,6 +204,24 @@ io.on('connection', socket => {
     if (manager) manager.setBotsPerTranscript(n);
     console.log('[config] Set bots per transcript:', n);
     io.emit('config', { botsPerTranscript: n });
+  });
+  
+  socket.on('learn:start', async (data: { channel: string; token: string }) => {
+    if (learnBot) learnBot.stop();
+    learnBot = new LearnBot((event, d) => io.emit(event, d));
+    try {
+      await learnBot.start(data.channel, data.token);
+      socket.emit('learn:started', { ok: true });
+    } catch (e: any) {
+      socket.emit('learn:error', { message: e.message });
+    }
+  });
+  
+  socket.on('learn:stop', () => {
+    if (learnBot) {
+      learnBot.stop();
+      learnBot = null;
+    }
   });
   socket.on('get:personas', () => socket.emit('personas:update', saved.personas));
   socket.on('get:phrases',  () => socket.emit('phrases:update', saved.phraseGroups));

@@ -136,11 +136,16 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
               const verified = await this.ai.verifyAndFix(
                 bot.username, markovGen, text, this.language, bot.index
               );
-              // Check if verified is valid (not empty, within limits)
-              if (verified && verified.length <= 30) {
+              // Check if verified is valid (not empty, not REJECT, within limits)
+              if (verified && verified !== 'REJECT' && verified.length <= 30) {
                 msg = verified;
               } else if (markovGen.length <= 30) {
                 msg = markovGen; // fallback to original markov
+              } else {
+                // REJECT or too long - use pure AI instead
+                msg = await this.ai.generateFromTranscription(
+                  bot.username, text, this.language, bot.index
+                );
               }
             } else {
               // Markov failed, fallback to AI

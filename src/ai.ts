@@ -210,9 +210,11 @@ export class AIService {
     
 Generated (from learned chat): "${markovText}"
 
-Check if this response makes sense given what the streamer said. 
-If yes, return it as-is. If not, rewrite it to be relevant.
-Rules: 1-6 words, max 30 chars, no @mentions, no punctuation, casual simple human messages.`;
+Check if this response makes sense given what the streamer said.
+IMPORTANT: If the generated message mentions names, places, or topics from the learned chat that don't match the current stream context - REJECT it and say "REJECT".
+If ok, rewrite it to be casual and relevant.
+Rules: 1-6 words, max 30 chars, no @mentions, no punctuation, casual simple human messages.
+Output only the message, or "REJECT" if irrelevant.`;
     
     try {
       console.log('[ai] verifyAndFix for', username, 'markov:', markovText.slice(0, 50));

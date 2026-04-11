@@ -142,7 +142,8 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
               );
               // Check if verified is valid (not empty, not REJECT, within limits)
               if (verified && verified !== 'REJECT' && verified.length <= 30) {
-                msg = verified;
+                // Strip punctuation
+                msg = verified.replace(/[.,!?;:]/g, '').trim();
               } else if (markovGen.length <= 30) {
                 msg = markovGen; // fallback to original markov
               } else {
@@ -150,12 +151,14 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
                 msg = await this.ai.generateFromTranscription(
                   bot.username, text, this.language, bot.index
                 );
+                msg = (msg || '').replace(/[.,!?;:]/g, '').trim();
               }
             } else {
               // Markov failed, fallback to AI
               msg = await this.ai.generateFromTranscription(
                 bot.username, text, this.language, bot.index
               );
+              msg = (msg || '').replace(/[.,!?;:]/g, '').trim();
             }
           } else {
             // Not enough data, use pure AI

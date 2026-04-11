@@ -155,7 +155,7 @@ export class AIService {
       system = [
         custom ? custom.sys : `You are a Twitch viewer. Write in ${lang}. Short reactions.`,
         `The streamer said: "${transcribedText}"` + (chatCtx ? '\n' + chatCtx : ''),
-        'MESSAGE MAX 30 CHARS. NO MORE.',
+        'Complete sentence, 1-6 words. Max 30 chars total.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }
@@ -164,7 +164,7 @@ export class AIService {
     try {
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 15,
+        max_tokens: 25,
         temperature: 1.0,
         frequency_penalty: 0,
         presence_penalty: 2.0,

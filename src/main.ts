@@ -265,20 +265,20 @@ async function autoStart(): Promise<void> {
   io.emit('bots:started', { bots: startedBots });
   console.log('[server] started', startedBots.length, 'bots');
   
-  // Send greeting after 5 seconds
-  console.log('[server] Scheduling greeting...');
-  setTimeout(() => {
-    console.log('[server] Sending greeting...');
-    if (manager && startedBots.length) {
-      const greetings = ['ку', 'привет', 'дарова'];
-      const randomBot = startedBots[Math.floor(Math.random() * startedBots.length)];
-      const greeting = greetings[Math.floor(Math.random() * greetings.length)];
-      if (randomBot && greeting) {
-        manager.sendManual([randomBot], greeting);
-        console.log('[server] Greeting sent:', randomBot, greeting);
+// Send greetings from all bots with delay
+  console.log('[server] Scheduling greetings for', startedBots.length, 'bots...');
+  for (let i = 0; i < startedBots.length; i++) {
+    const botName = startedBots[i];
+    const delay = 5000 + i * 30000;
+    setTimeout(() => {
+      if (manager && botName) {
+        const greetings = ['ку', 'привет', 'дарова', 'всем привет'];
+        const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+        manager.sendManual([botName], greeting);
+        console.log('[server] Greeting:', botName, greeting);
       }
-    }
-  }, 5000);
+    }, delay);
+  }
 
   // Start transcription
   transcriber = new TranscriptionService(cfg.groqKey, cfg.channel);

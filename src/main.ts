@@ -196,9 +196,11 @@ io.on('connection', socket => {
     saved.phraseGroups = data; saveToDisk(saved, currentChannel); io.emit('phrases:update', saved.phraseGroups);
   });
   socket.on('set:bots_per_transcript', (data: { n: number }) => {
-    const n = Math.max(1, parseInt(String(data.n)) || 2);
+    const rawN = data.n;
+    const n = rawN === 99 ? 99 : Math.max(1, parseInt(String(rawN))) || 2;
     saved.botsPerTranscript = n; saveToDisk(saved, currentChannel);
     if (manager) manager.setBotsPerTranscript(n);
+    console.log('[config] Set bots per transcript:', n);
     io.emit('config', { botsPerTranscript: n });
   });
   socket.on('get:personas', () => socket.emit('personas:update', saved.personas));

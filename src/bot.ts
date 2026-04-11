@@ -77,7 +77,8 @@ export class BotManager {
     const allBots = Array.from(this.bots.values()).filter(b => b.connected);
     if (!allBots.length) return;
 
-    const count = Math.max(1, Math.min(this.botsPerTranscript, allBots.length) - (Math.random() < 0.3 ? 1 : 0));
+    const maxCount = this.botsPerTranscript === 99 ? allBots.length : this.botsPerTranscript;
+    const count = Math.max(1, Math.min(maxCount, allBots.length) - (this.botsPerTranscript === 99 ? 0 : (Math.random() < 0.3 ? 1 : 0)));
     const responding: BotInstance[] = [];
     for (let i = 0; i < count; i++) {
       responding.push(allBots[(this.transcriptResponseIdx + i) % allBots.length]);
@@ -284,7 +285,7 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
 
   setPersona(username: string, cfg: PersonaConfig): void { this.ai.setPersona(username, cfg); }
   getPersonas(): Record<string, PersonaConfig> { return this.ai.getPersonas(); }
-  setBotsPerTranscript(n: number): void { this.botsPerTranscript = Math.max(1, n); }
+  setBotsPerTranscript(n: number): void { this.botsPerTranscript = n === 99 ? 99 : Math.max(1, n); }
 
   async stop(): Promise<void> {
     console.log('[manager] stopping...');

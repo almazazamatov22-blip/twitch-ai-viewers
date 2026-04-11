@@ -332,9 +332,11 @@ const themeOverrides = {
                   <div class="bots-config">
                     <span>Отвечают на транскрипцию:</span>
                     <n-button-group>
-                      <n-button v-for="i in Math.min(6, totalBots || 3)" :key="i" 
+                      <n-button v-for="i in 6" :key="i" 
                                :type="botsPerTranscript === i ? 'primary' : 'default'"
                                @click="setBotsPerTranscript(i)">{{ i }}</n-button>
+                      <n-button :type="botsPerTranscript === 99 ? 'primary' : 'default'"
+                               @click="setBotsPerTranscript(99)">Все</n-button>
                     </n-button-group>
                   </div>
                   

@@ -90,9 +90,16 @@ function readEnvConfig() {
 }
 
 function readLearnConfig() {
+  const learnChan = extractChannel(process.env.LEARN_CHANNEL || '');
+  const bots: { username: string; token: string }[] = [];
+  for (let i = 1; i <= 50; i++) {
+    const u = process.env['BOT' + i + '_USERNAME']?.trim();
+    const t = (process.env['BOT' + i + '_OAUTH'] || process.env['BOT' + i + '_OAUTH_TOKEN'])?.trim();
+    if (u && t) bots.push({ username: u, token: t });
+  }
   return {
-    channel: extractChannel(process.env.LEARN_CHANNEL || ''),
-    token: (process.env.LEARN_OAUTH || '').trim(),
+    channel: learnChan,
+    tokens: bots.map(b => b.token),
   };
 }
 
@@ -215,14 +222,16 @@ io.on('connection', socket => {
   
   socket.on('learn:start', async () => {
     const config = readLearnConfig();
-    if (!config.channel || !config.token) {
-      socket.emit('learn:error', { message: 'Настройте LEARN_CHANNEL и LEARN_OAUTH в Variables' });
+    if (!config.channel || !config.tokens.length) {
+      socket.emit('learn:error', { message: 'Настройте LEARN_CHANNEL и добавьте ботов BOT1_OAUTH итд' });
       return;
     }
     if (learnBot) learnBot.stop();
     learnBot = new LearnBot((event, d) => io.emit(event, d));
+    
+    // Use first bot for learning
     try {
-      await learnBot.start(config.channel, config.token);
+      await learnBot.start(config.channel, config.tokens[0]);
       socket.emit('learn:started', { ok: true });
     } catch (e: any) {
       socket.emit('learn:error', { message: e.message });

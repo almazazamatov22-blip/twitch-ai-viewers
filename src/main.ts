@@ -484,6 +484,7 @@ async function saveLearnData(): Promise<void> {
       io.emit('learn:log', '✅ Сохранено в GitHub Repo');
       return;
     }
+    console.log('[github] Repo save failed, trying Gist...');
   }
   
   // Fallback to Gist (legacy)

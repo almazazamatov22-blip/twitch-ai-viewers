@@ -191,7 +191,7 @@ export class AIService {
     }
   }
 
-  async polishWithContext(
+  async verifyAndFix(
     username: string,
     markovText: string,
     transcription: string,
@@ -203,20 +203,22 @@ export class AIService {
     const lang = custom ? '' : (language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English');
     
     const system = custom ? 
-      custom.sys + '\nMake it relevant to what the streamer said.' :
-      `You are a Twitch viewer. Write in ${lang}. Short reactions.`;
+      custom.sys :
+      `You are a Twitch viewer. Write in ${lang}.`;
     
-    const userPrompt = `The streamer's last message was: "${transcription}"
+    const userPrompt = `Streamer said: "${transcription}"
     
-Your raw generated response: "${markovText}"
+Generated (from learned chat): "${markovText}"
 
-Rewrite this to be more relevant to what the streamer just said. Keep it short (1-6 words, max 30 chars total).`;
+Check if this response makes sense given what the streamer said. 
+If yes, return it as-is. If not, rewrite it to be relevant.
+Rules: 1-6 words, max 30 chars, no emojis.`;
     
     try {
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
-        max_tokens: 25,
-        temperature: 0.8,
+        max_tokens: 20,
+        temperature: 0.3,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: userPrompt },
@@ -224,10 +226,9 @@ Rewrite this to be more relevant to what the streamer just said. Keep it short (
       });
       
       const raw = res.choices[0]?.message?.content?.trim() || '';
-      console.log('[ai] polished:', markovText, '→', raw);
       return raw.slice(0, 200);
     } catch (e: any) {
-      console.error('[ai] polish error:', e.message);
+      console.error('[ai] verifyAndFix error:', e.message);
       return '';
     }
   }

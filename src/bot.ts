@@ -124,31 +124,27 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
         try {
           let msg = '';
           
-          // Hybrid: 50% chance use Markov+AI, 50% pure AI
+          // 100% Markov Chain generation with AI verification
           if (this.learnBot && this.learnBot.hasEnoughData && this.learnBot.hasEnoughData(100)) {
-            if (Math.random() < 0.5) {
-              // Generate with Markov context
-              const markovGen = this.learnBot.generateWithContext ? 
-                this.learnBot.generateWithContext(text, 5) : 
-                this.learnBot.generate();
-              
-              if (markovGen && markovGen.length > 10) {
-                // Use AI to polish the Markov output based on transcription
-                const polished = await this.ai.polishWithContext(
-                  bot.username, markovGen, text, this.language, bot.index
-                );
-                msg = polished || markovGen;
-              } else {
-                msg = await this.ai.generateFromTranscription(
-                  bot.username, text, this.language, bot.index
-                );
-              }
+            // Generate from Markov
+            const markovGen = this.learnBot.generateWithContext ? 
+              this.learnBot.generateWithContext(text, 5) : 
+              this.learnBot.generate();
+            
+            if (markovGen && markovGen.length > 5) {
+              // Use AI to verify and fix the Markov output
+              const verified = await this.ai.verifyAndFix(
+                bot.username, markovGen, text, this.language, bot.index
+              );
+              msg = verified || markovGen;
             } else {
+              // Markov failed, fallback to AI
               msg = await this.ai.generateFromTranscription(
                 bot.username, text, this.language, bot.index
               );
             }
           } else {
+            // Not enough data, use pure AI
             msg = await this.ai.generateFromTranscription(
               bot.username, text, this.language, bot.index
             );

@@ -225,4 +225,12 @@ export class LearnBot {
       running: this.running,
     };
   }
+
+  loadData(data: { chain: MarkovChain; starts: string[]; messages: number; words: number }): void {
+    this.chain = data.chain || {};
+    this.starts = data.starts || [];
+    this.messages = data.messages || 0;
+    this.words = data.words || 0;
+    console.log('[learn] Loaded data:', this.messages, 'messages,', Object.keys(this.chain).length, 'unique chains');
+  }
 }

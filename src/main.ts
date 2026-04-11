@@ -152,11 +152,42 @@ let transcriber: TranscriptionService | null = null;
 let learnBot: LearnBot | null = null;
 let streamPoll: NodeJS.Timeout | null = null;
 let historySaveInterval: NodeJS.Timeout | null = null;
+let learnSaveInterval: NodeJS.Timeout | null = null;
 let startedBots: string[] = [];
 let isStarted = false;
 let currentChannel = '';
 let saved: SavedConfig = { personas: {}, phraseGroups: {} };
 let channelId: string | null = null;
+
+function getLearnDataPath(): string {
+  return path.join(DATA_DIR, 'markov-chain.json');
+}
+
+function loadLearnData(): any {
+  const p = getLearnDataPath();
+  try {
+    if (fs.existsSync(p)) {
+      const data = JSON.parse(fs.readFileSync(p, 'utf-8'));
+      console.log('[learn] Loaded', data.messages || 0, 'messages from', p);
+      return data;
+    }
+  } catch (e: any) {
+    console.log('[learn] Could not load saved data:', e.message);
+  }
+  return null;
+}
+
+function saveLearnData(): void {
+  if (!learnBot) return;
+  const p = getLearnDataPath();
+  try {
+    const data = learnBot.getData();
+    fs.writeFileSync(p, JSON.stringify(data, null, 2));
+    console.log('[learn] Saved', data.messages, 'messages to', p);
+  } catch (e: any) {
+    console.log('[learn] Could not save:', e.message);
+  }
+}
 
 function loadConfigForChannel(channel: string): SavedConfig {
   currentChannel = channel;
@@ -236,6 +267,19 @@ io.on('connection', socket => {
     if (learnBot) learnBot.stop();
     learnBot = new LearnBot((e, d) => io.emit(e, d));
     
+    // Load saved data if exists
+    const savedData = loadLearnData();
+    if (savedData) {
+      learnBot.loadData(savedData);
+      io.emit('learn:log', 'Загружено ' + savedData.messages + ' сохранённых сообщений');
+    }
+    
+    // Auto-save every 5 minutes
+    if (learnSaveInterval) clearInterval(learnSaveInterval);
+    learnSaveInterval = setInterval(() => {
+      saveLearnData();
+    }, 300000);
+    
     try {
       await learnBot.start(config.channel, config.tokens);
       socket.emit('learn:started', { ok: true });
@@ -246,8 +290,13 @@ io.on('connection', socket => {
   });
   
   socket.on('learn:stop', () => {
-    if (learnBot) { learnBot.stop(); learnBot = null; }
-    io.emit('learn:log', 'Обучение остановлено');
+    if (learnBot) { 
+      saveLearnData();
+      learnBot.stop(); 
+      learnBot = null; 
+    }
+    if (learnSaveInterval) { clearInterval(learnSaveInterval); learnSaveInterval = null; }
+    io.emit('learn:log', 'Обучение остановлено, данные сохранены');
   });
 
   socket.on('learn:getData', () => {
@@ -297,6 +346,21 @@ async function autoStart(): Promise<void> {
   const info = await getStreamData(cfg.channel);
   channelId = (info as any).userId || null;
   console.log('[server] channelId=' + channelId + ' live=' + info.live);
+
+  // Initialize learnBot with saved data (without starting it)
+  const learnConfig = readLearnConfig();
+  if (learnConfig.channel && learnConfig.tokens.length > 0) {
+    if (!learnBot) {
+      learnBot = new LearnBot((e, d) => io.emit(e, d));
+    }
+    const savedData = loadLearnData();
+    if (savedData) {
+      learnBot.loadData(savedData);
+      console.log('[server] Loaded learn data:', savedData.messages, 'messages');
+    }
+    io.emit('learn:config', { channel: learnConfig.channel });
+    io.emit('learn:status', learnBot.getStats());
+  }
 
   manager = new BotManager(
     cfg.bots, cfg.channel, cfg.groqKey,

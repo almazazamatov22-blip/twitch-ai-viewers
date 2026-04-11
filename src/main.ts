@@ -178,8 +178,84 @@ function readLearnConfig() {
   };
 }
 
-// ── GitHub Gist for Markov data ───────────────────────────────────────────────
+// ── GitHub Repo for Markov data ───────────────────────────────────────────────
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN?.trim();
+const GITHUB_REPO = process.env.GITHUB_REPO?.trim(); // format: "owner/repo"
+const GITHUB_FILE_PATH = process.env.GITHUB_FILE_PATH?.trim() || 'markov-data.json';
+
+async function loadFromGitHubRepo(): Promise<any | null> {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) {
+    console.log('[github] No GITHUB_REPO configured');
+    return null;
+  }
+  
+  const [owner, repo] = GITHUB_REPO.split('/');
+  if (!owner || !repo) {
+    console.log('[github] Invalid GITHUB_REPO format');
+    return null;
+  }
+  
+  try {
+    // Try to get file (returns 404 if doesn't exist)
+    const r = await axios.get(`https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`, {
+      headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
+    });
+    
+    if (r.data.content) {
+      const content = Buffer.from(r.data.content, 'base64').toString('utf-8');
+      console.log('[github] Loaded Markov data from repo');
+      return JSON.parse(content);
+    }
+    return null;
+  } catch (e: any) {
+    if (e.response?.status === 404) {
+      console.log('[github] File not found, will create on first save');
+      return null;
+    }
+    console.log('[github] Could not load:', e.message);
+    return null;
+  }
+}
+
+async function saveToGitHubRepo(data: any): Promise<boolean> {
+  if (!GITHUB_TOKEN || !GITHUB_REPO) return false;
+  
+  const [owner, repo] = GITHUB_REPO.split('/');
+  if (!owner || !repo) return false;
+  
+  const json = JSON.stringify(data, null, 2);
+  
+  try {
+    // First try to get current file to get SHA
+    let sha = '';
+    try {
+      const r = await axios.get(`https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`, {
+        headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
+      });
+      sha = r.data.sha;
+    } catch {}
+    
+    // Create or update file
+    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`;
+    const payload: any = {
+      message: 'Update Markov chain data',
+      content: Buffer.from(json).toString('base64'),
+    };
+    if (sha) payload.sha = sha;
+    
+    await axios.put(url, payload, {
+      headers: { Authorization: 'Bearer ' + GITHUB_TOKEN, 'Content-Type': 'application/json' },
+    });
+    
+    console.log('[github] Saved to repo, size:', json.length);
+    return true;
+  } catch (e: any) {
+    console.log('[github] Save error:', e.message);
+    return false;
+  }
+}
+
+// Legacy Gist support (keep for backward compatibility)
 const MARKOV_GIST_ID = process.env.MARKOV_GIST_ID?.trim();
 
 async function loadFromGitHub(): Promise<any | null> {
@@ -338,11 +414,11 @@ function getLearnDataPath(): string {
 }
 
 async function loadLearnData(): Promise<any> {
-  // Try GitHub first
-  if (GITHUB_TOKEN) {
-    const githubData = await loadFromGitHub();
+  // Try GitHub Repo first
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    const githubData = await loadFromGitHubRepo();
     if (githubData) {
-      console.log('[learn] Loaded from GitHub:', githubData.messages || 0, 'messages');
+      console.log('[learn] Loaded from GitHub Repo:', githubData.messages || 0, 'messages');
       // Also save locally as backup
       try {
         fs.writeFileSync(getLearnDataPath(), JSON.stringify(githubData, null, 2));
@@ -350,6 +426,17 @@ async function loadLearnData(): Promise<any> {
       return githubData;
     }
   }
+  
+  // Try Legacy Gist (backward compatibility)
+  if (GITHUB_TOKEN && MARKOV_GIST_ID) {
+    const gistData = await loadFromGitHub();
+    if (gistData) {
+      console.log('[learn] Loaded from Gist:', gistData.messages || 0, 'messages');
+      try { fs.writeFileSync(getLearnDataPath(), JSON.stringify(gistData, null, 2)); } catch {}
+      return gistData;
+    }
+  }
+  
   // Fallback to local file
   const p = getLearnDataPath();
   try {
@@ -377,7 +464,17 @@ async function saveLearnData(): Promise<void> {
     console.log('[learn] Local save error:', e.message);
   }
   
-  // Save to GitHub
+  // Save to GitHub Repo (new way)
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    console.log('[github] Saving to Repo...');
+    const ok = await saveToGitHubRepo(data);
+    if (ok) {
+      io.emit('learn:log', '✅ Сохранено в GitHub Repo');
+      return;
+    }
+  }
+  
+  // Fallback to Gist (legacy)
   console.log('[github] saveToGitHub check - token:', !!GITHUB_TOKEN, 'gistId:', !!MARKOV_GIST_ID, 'data msgs:', data.messages);
   if (GITHUB_TOKEN && MARKOV_GIST_ID) {
     console.log('[github] Calling saveToGitHub...');

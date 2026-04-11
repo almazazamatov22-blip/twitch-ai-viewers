@@ -111,12 +111,13 @@ export class TranscriptionService {
 
   private captureAudio(outputFile: string): Promise<boolean> {
     return new Promise((resolve) => {
-      // Find streamlink in nix store
+      // Find streamlink in nix store - look for executable, not bash completion
       const { execSync } = require('child_process');
       let streamlinkPath = 'streamlink';
       try {
-        const path = execSync('which streamlink 2>/dev/null || find /nix/store -name streamlink -type f 2>/dev/null | head -1', { encoding: 'utf8' }).trim();
-        if (path && !path.includes('which')) {
+        // Find executable named streamlink (not completion files)
+        const path = execSync('which streamlink 2>/dev/null || find /nix/store -name streamlink -type f -executable 2>/dev/null | grep -v completion | head -1', { encoding: 'utf8' }).trim();
+        if (path && !path.includes('which') && !path.includes('completion')) {
           streamlinkPath = path;
           console.log('[transcription] Found streamlink:', streamlinkPath);
         }

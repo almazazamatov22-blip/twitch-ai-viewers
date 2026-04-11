@@ -329,13 +329,14 @@ const themeOverrides = {
                     </n-alert>
                   </div>
                   
-                  <div class="bots-config">
-                    <span>Отвечают на транскрипцию:</span>
-                    <n-button-group>
-                      <n-button v-for="i in 6" :key="i" 
+                  <div class="bots-config" style="flex-wrap: wrap;">
+                    <span>Отвечают:</span>
+                    <n-button-group size="small">
+                      <n-button v-for="i in 6" :key="i" size="tiny"
                                :type="botsPerTranscript === i ? 'primary' : 'default'"
                                @click="setBotsPerTranscript(i)">{{ i }}</n-button>
-                      <n-button :type="botsPerTranscript === 99 ? 'primary' : 'default'"
+                      <n-button size="tiny"
+                               :type="botsPerTranscript === 99 ? 'primary' : 'default'"
                                @click="setBotsPerTranscript(99)">Все</n-button>
                     </n-button-group>
                   </div>
@@ -656,9 +657,10 @@ body {
 .bots-config {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 16px;
-  padding: 12px;
+  padding: 10px;
   background: rgba(34, 197, 94, 0.06);
   border: 1px solid rgba(34, 197, 94, 0.15);
   border-radius: 8px;

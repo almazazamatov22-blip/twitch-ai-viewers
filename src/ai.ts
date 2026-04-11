@@ -212,9 +212,10 @@ Generated (from learned chat): "${markovText}"
 
 Check if this response makes sense given what the streamer said. 
 If yes, return it as-is. If not, rewrite it to be relevant.
-Rules: 1-6 words, max 30 chars, no emojis.`;
+Rules: 1-6 words, max 30 chars, no @mentions, no punctuation, casual simple human messages.`;
     
     try {
+      console.log('[ai] verifyAndFix for', username, 'markov:', markovText.slice(0, 50));
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         max_tokens: 20,
@@ -226,10 +227,11 @@ Rules: 1-6 words, max 30 chars, no emojis.`;
       });
       
       const raw = res.choices[0]?.message?.content?.trim() || '';
-      return raw.slice(0, 200);
+      console.log('[ai] verifyAndFix result:', raw.slice(0, 100));
+      return raw.slice(0, 200) || markovText; // fallback to markov if empty
     } catch (e: any) {
       console.error('[ai] verifyAndFix error:', e.message);
-      return '';
+      return markovText; // fallback to markov on error
     }
   }
 }

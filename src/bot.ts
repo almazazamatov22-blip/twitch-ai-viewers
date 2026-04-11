@@ -136,7 +136,12 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
               const verified = await this.ai.verifyAndFix(
                 bot.username, markovGen, text, this.language, bot.index
               );
-              msg = verified || markovGen;
+              // Check if verified is valid (not empty, within limits)
+              if (verified && verified.length <= 30) {
+                msg = verified;
+              } else if (markovGen.length <= 30) {
+                msg = markovGen; // fallback to original markov
+              }
             } else {
               // Markov failed, fallback to AI
               msg = await this.ai.generateFromTranscription(

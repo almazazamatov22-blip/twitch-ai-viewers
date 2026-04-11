@@ -190,4 +190,45 @@ export class AIService {
       return '';
     }
   }
+
+  async polishWithContext(
+    username: string,
+    markovText: string,
+    transcription: string,
+    language: string,
+    botIndex = 0
+  ): Promise<string> {
+    const k = username.toLowerCase();
+    const custom = this.customPersonas.get(k);
+    const lang = custom ? '' : (language === 'ru' ? 'Russian' : language === 'kk' ? 'Kazakh' : 'English');
+    
+    const system = custom ? 
+      custom.sys + '\nMake it relevant to what the streamer said.' :
+      `You are a Twitch viewer. Write in ${lang}. Short reactions.`;
+    
+    const userPrompt = `The streamer's last message was: "${transcription}"
+    
+Your raw generated response: "${markovText}"
+
+Rewrite this to be more relevant to what the streamer just said. Keep it short (1-6 words, max 30 chars total).`;
+    
+    try {
+      const res = await this.groq.chat.completions.create({
+        model: 'llama-3.1-8b-instant',
+        max_tokens: 25,
+        temperature: 0.8,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: userPrompt },
+        ],
+      });
+      
+      const raw = res.choices[0]?.message?.content?.trim() || '';
+      console.log('[ai] polished:', markovText, '→', raw);
+      return raw.slice(0, 200);
+    } catch (e: any) {
+      console.error('[ai] polish error:', e.message);
+      return '';
+    }
+  }
 }

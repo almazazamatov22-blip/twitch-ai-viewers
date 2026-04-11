@@ -140,6 +140,53 @@ export class LearnBot {
     return result.join(' ');
   }
 
+  generateWithContext(context: string, minWords: number = 5): string {
+    if (Object.keys(this.chain).length === 0) return '';
+    
+    const contextWords = context.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const matchingStarts: string[] = [];
+    
+    for (const word of contextWords) {
+      for (const start of this.starts) {
+        if (start.toLowerCase().includes(word)) {
+          matchingStarts.push(start);
+        }
+      }
+    }
+    
+    let result = '';
+    if (matchingStarts.length > 0) {
+      result = this.generate(matchingStarts[Math.floor(Math.random() * matchingStarts.length)]);
+    }
+    
+    if (!result || result.split(' ').length < minWords) {
+      result = this.generate();
+    }
+    
+    return result;
+  }
+
+  getTopPhrases(count: number = 10): string[] {
+    const phraseCounts: Record<string, number> = {};
+    
+    for (const key of Object.keys(this.chain)) {
+      const phrases = this.chain[key];
+      if (phrases.length > 1) {
+        const phrase = key + ' ' + phrases[0];
+        phraseCounts[phrase] = (phraseCounts[phrase] || 0) + phrases.length;
+      }
+    }
+    
+    return Object.entries(phraseCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, count)
+      .map(([phrase]) => phrase);
+  }
+
+  hasEnoughData(minMessages: number = 100): boolean {
+    return this.messages >= minMessages;
+  }
+
   getData() {
     return {
       chain: this.chain,

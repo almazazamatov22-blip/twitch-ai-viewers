@@ -310,6 +310,7 @@ async function autoStart(): Promise<void> {
       savedHistory: saved.botHistories || {},
       savedTranscriptHistory: saved.transcriptHistory || [],
       savedRealChatHistory: saved.realChatHistory || [],
+      learnBot: learnBot,
     },
     (event, data) => {
       io.emit(event, data);

@@ -31,6 +31,7 @@ export class BotManager {
   private transcriptResponseIdx = 0;
   private botsPerTranscript = 2;
   private pointsService: ChannelPointsService | null = null;
+  private learnBot: any = null;
 
   constructor(
     configs: BotConfig[],
@@ -47,6 +48,7 @@ export class BotManager {
       savedHistory?: Record<string, { role: string; content: string; time: number }[]>;
       savedTranscriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
       savedRealChatHistory?: { username: string; message: string; time: number }[];
+      learnBot?: any;
     },
     emit: EmitFn
   ) {
@@ -54,6 +56,7 @@ export class BotManager {
     this.language = opts.language;
     this.emit = emit;
     this.botsPerTranscript = opts.botsPerTranscript || 2;
+    this.learnBot = opts.learnBot || null;
     this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas, opts.savedHistory, opts.savedTranscriptHistory, opts.savedRealChatHistory);
 
     // Init points service if we have channel ID
@@ -119,9 +122,38 @@ export class BotManager {
         if (this.stopped || !bot.connected) return;
 if (Date.now() - bot.lastMsgTime < 5000) return;
         try {
-          const msg = await this.ai.generateFromTranscription(
-            bot.username, text, this.language, bot.index
-          );
+          let msg = '';
+          
+          // Hybrid: 50% chance use Markov+AI, 50% pure AI
+          if (this.learnBot && this.learnBot.hasEnoughData && this.learnBot.hasEnoughData(100)) {
+            if (Math.random() < 0.5) {
+              // Generate with Markov context
+              const markovGen = this.learnBot.generateWithContext ? 
+                this.learnBot.generateWithContext(text, 5) : 
+                this.learnBot.generate();
+              
+              if (markovGen && markovGen.length > 10) {
+                // Use AI to polish the Markov output based on transcription
+                const polished = await this.ai.polishWithContext(
+                  bot.username, markovGen, text, this.language, bot.index
+                );
+                msg = polished || markovGen;
+              } else {
+                msg = await this.ai.generateFromTranscription(
+                  bot.username, text, this.language, bot.index
+                );
+              }
+            } else {
+              msg = await this.ai.generateFromTranscription(
+                bot.username, text, this.language, bot.index
+              );
+            }
+          } else {
+            msg = await this.ai.generateFromTranscription(
+              bot.username, text, this.language, bot.index
+            );
+          }
+          
           if (!msg || this.stopped) return;
           console.log('[bot]', bot.username, '→', '"' + msg + '"');
           await bot.client.say('#' + this.channel, msg);

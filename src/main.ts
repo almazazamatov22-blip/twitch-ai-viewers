@@ -183,6 +183,10 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN?.trim();
 const GITHUB_REPO = process.env.GITHUB_REPO?.trim(); // format: "owner/repo"
 const GITHUB_FILE_PATH = process.env.GITHUB_FILE_PATH?.trim() || 'markov-data.json';
 
+console.log('[env] GITHUB_TOKEN set:', !!GITHUB_TOKEN);
+console.log('[env] GITHUB_REPO set:', GITHUB_REPO || 'NOT SET');
+console.log('[env] GITHUB_FILE_PATH:', GITHUB_FILE_PATH);
+
 async function loadFromGitHubRepo(): Promise<any | null> {
   if (!GITHUB_TOKEN || !GITHUB_REPO) {
     console.log('[github] No GITHUB_REPO configured');
@@ -241,6 +245,7 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
     
     // Create or update file
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`;
+    console.log('[github] PUT to:', url);
     const payload: any = {
       message: 'Update Markov chain data',
       content: Buffer.from(json).toString('base64'),
@@ -458,6 +463,8 @@ async function saveLearnData(): Promise<void> {
   if (!learnBot) return;
   const data = learnBot.getData();
   
+  console.log('[learn] saveLearnData - GITHUB_TOKEN:', !!GITHUB_TOKEN, 'GITHUB_REPO:', GITHUB_REPO);
+  
   // Save locally as backup
   const p = getLearnDataPath();
   try {
@@ -468,9 +475,11 @@ async function saveLearnData(): Promise<void> {
   }
   
   // Save to GitHub Repo (new way)
+  console.log('[github] Checking save - GITHUB_TOKEN:', !!GITHUB_TOKEN, 'GITHUB_REPO:', GITHUB_REPO);
   if (GITHUB_TOKEN && GITHUB_REPO) {
     console.log('[github] Saving to Repo...');
     const ok = await saveToGitHubRepo(data);
+    console.log('[github] saveToGitHubRepo result:', ok);
     if (ok) {
       io.emit('learn:log', '✅ Сохранено в GitHub Repo');
       return;
@@ -763,16 +772,17 @@ async function autoStart(): Promise<void> {
 http.listen(PORT, () => {
   console.log('\nTwitchBoost at http://localhost:' + PORT + '\n');
   
-  const token = process.env.GITHUB_TOKEN?.trim();
-  const gistId = process.env.MARKOV_GIST_ID?.trim();
-  
-  if (token && gistId) {
-    console.log('[github] ✓ GitHub configured (token length:', token.length, ')');
-  } else {
-    console.log('[github] ✗ GITHUB_TOKEN or MARKOV_GIST_ID not set');
-    console.log('[github] GITHUB_TOKEN:', token ? 'set' : 'not set');
-    console.log('[github] MARKOV_GIST_ID:', gistId ? 'set' : 'not set');
-  }
+    const token = process.env.GITHUB_TOKEN?.trim();
+    const gistId = process.env.MARKOV_GIST_ID?.trim();
+    const repo = process.env.GITHUB_REPO?.trim();
+    
+    if (token && (gistId || repo)) {
+      console.log('[github] ✓ GitHub configured (token len:', token.length, ')');
+    } else {
+      console.log('[github] ✗ GITHUB_TOKEN or GITHUB_REPO not set');
+      console.log('[github] GITHUB_TOKEN:', token ? 'set' : 'not set');
+      console.log('[github] GITHUB_REPO:', repo ? 'set' : 'not set');
+    }
   
   setTimeout(autoStart, 1500);
 });

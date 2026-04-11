@@ -217,9 +217,7 @@ function setBotsPerTranscript(n) {
   socket.value.emit('set:bots_per_transcript', { n })
 }
 
-function claimPoints() {
-  socket.value.emit('claim:points')
-}
+// points disabled
 
 const themeOverrides = {
   common: {

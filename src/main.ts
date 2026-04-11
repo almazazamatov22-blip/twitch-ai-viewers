@@ -224,6 +224,7 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
   if (!owner || !repo) return false;
   
   const json = JSON.stringify(data, null, 2);
+  console.log('[github] Saving to repo:', owner, repo, 'size:', json.length);
   
   try {
     // First try to get current file to get SHA
@@ -233,7 +234,10 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
         headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
       });
       sha = r.data.sha;
-    } catch {}
+      console.log('[github] Got SHA:', sha);
+    } catch (e: any) {
+      console.log('[github] Get file error:', e.message, e.response?.status);
+    }
     
     // Create or update file
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`;
@@ -243,14 +247,13 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
     };
     if (sha) payload.sha = sha;
     
-    await axios.put(url, payload, {
+    const res = await axios.put(url, payload, {
       headers: { Authorization: 'Bearer ' + GITHUB_TOKEN, 'Content-Type': 'application/json' },
     });
-    
-    console.log('[github] Saved to repo, size:', json.length);
+    console.log('[github] Saved to repo, status:', res.status);
     return true;
   } catch (e: any) {
-    console.log('[github] Save error:', e.message);
+    console.log('[github] Save to repo error:', e.message, e.response?.status, e.response?.data);
     return false;
   }
 }

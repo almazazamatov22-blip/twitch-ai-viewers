@@ -246,10 +246,11 @@ async function saveToGitHub(data: any): Promise<boolean> {
       return true;
     } else {
       // Update existing gist
-      await axios.patch(`https://api.github.com/gists/${gistId}`, {
+      console.log('[github] Patching gist:', gistId, 'data size:', json.length);
+      const r = await axios.patch(`https://api.github.com/gists/${gistId}`, {
         files: { 'markov-chain.json': { content: json } },
       }, { headers: { Authorization: 'token ' + GITHUB_TOKEN } });
-      console.log('[github] Updated gist');
+      console.log('[github] Updated gist, response:', r.status);
       return true;
     }
   } catch (e: any) {

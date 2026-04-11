@@ -699,6 +699,7 @@ async function autoStart(): Promise<void> {
       savedTranscriptHistory: saved.transcriptHistory || [],
       savedRealChatHistory: saved.realChatHistory || [],
       learnBot: learnBot,
+      currentGame: (info as any).game || '',
     },
     (event, data) => {
       io.emit(event, data);
@@ -754,6 +755,7 @@ async function autoStart(): Promise<void> {
     if ((si as any).userId && !channelId) channelId = (si as any).userId;
     io.emit('stream:info', { live: si.live, game: (si as any).game, viewers: (si as any).viewers });
     if ((si as any).viewers != null) io.emit('stream:viewers', { viewers: (si as any).viewers });
+    if (manager && (si as any).game) manager.setGame((si as any).game);
   }, 30000);
 
   // Save history every 10 minutes - save EVERYTHING

@@ -32,6 +32,7 @@ export class BotManager {
   private botsPerTranscript = 2;
   private pointsService: ChannelPointsService | null = null;
   private learnBot: any = null;
+  private currentGame = '';
 
   constructor(
     configs: BotConfig[],
@@ -49,6 +50,7 @@ export class BotManager {
       savedTranscriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
       savedRealChatHistory?: { username: string; message: string; time: number }[];
       learnBot?: any;
+      currentGame?: string;
     },
     emit: EmitFn
   ) {
@@ -57,7 +59,9 @@ export class BotManager {
     this.emit = emit;
     this.botsPerTranscript = opts.botsPerTranscript || 2;
     this.learnBot = opts.learnBot || null;
+    this.currentGame = opts.currentGame || '';
     this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas, opts.savedHistory, opts.savedTranscriptHistory, opts.savedRealChatHistory);
+    this.ai.setChannel(this.channel);
 
     // Init points service if we have channel ID
     if (opts.channelId && opts.clientId) {
@@ -381,5 +385,9 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
   }
   getHistoryForSave(): { histories: Record<string, any[]>; transcripts: any[]; realChat: any[] } {
     return this.ai.getHistoryForSave();
+  }
+  setGame(game: string): void {
+    this.currentGame = game;
+    this.ai.setGame(game);
   }
 }

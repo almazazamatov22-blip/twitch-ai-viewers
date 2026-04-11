@@ -55,6 +55,8 @@ export class AIService {
   private settings: Record<string, boolean>;
   private customPersonas = new Map<string, PersonaConfig>();
   public transcriptLog: TranscriptEntry[] = [];
+  private currentGame = '';
+  private channelName = '';
 
   constructor(
     apiKey: string, 
@@ -120,6 +122,12 @@ export class AIService {
   addRealMessage(displayName: string, message: string): void {
     this.realChatSamples.push(displayName + ': ' + message);
     if (this.realChatSamples.length > 500) this.realChatSamples.shift();
+  }
+  setGame(game: string): void {
+    this.currentGame = game;
+  }
+  setChannel(channel: string): void {
+    this.channelName = channel;
   }
 
   async generateFromTranscription(
@@ -204,14 +212,15 @@ export class AIService {
     
     const system = custom ? 
       custom.sys :
-      `You are a Twitch viewer. Write in ${lang}.`;
+      `You are a Twitch viewer watching ${this.channelName || 'stream'}${this.currentGame ? ' playing ' + this.currentGame : ''}. Write in ${lang}.`;
     
-    const userPrompt = `Streamer said: "${transcription}"
+    const userPrompt = `Current game: ${this.currentGame || 'Just Chatting'}
+Streamer said: "${transcription}"
     
 Generated (from learned chat): "${markovText}"
 
-Check if this response makes sense given what the streamer said.
-IMPORTANT: If the generated message mentions names, places, or topics from the learned chat that don't match the current stream context - REJECT it and say "REJECT".
+Check if this response makes sense given the current stream context.
+IMPORTANT: If the generated message mentions names, places, or topics from the learned chat that don't match the current stream - REJECT and say "REJECT".
 If ok, rewrite it to be casual and relevant.
 Rules: 1-6 words, max 30 chars, no @mentions, no punctuation, casual simple human messages.
 Output only the message, or "REJECT" if irrelevant.`;

@@ -150,13 +150,13 @@ export class AIService {
 
     if (taggedMessage) {
       system = custom ? custom.sys + '\nNatural chat.' :
-        `You are a Twitch viewer. Write in ${lang}. 1-2 sentences max.`;
+        `You are a Twitch viewer. Write in ${lang}. 1-2 sentences max, no punctuation.`;
       userPrompt = `Reply to: "${taggedMessage}"`;
     } else {
       system = [
         custom ? custom.sys : `You are a Twitch viewer. Write in ${lang}. Short reactions.`,
         `The streamer said: "${transcribedText}"`,
-        'Complete sentence, 1-6 words. Max 30 chars total.',
+        '1-6 words, max 30 chars, no punctuation, casual simple.',
       ].filter(Boolean).join('\n');
       userPrompt = 'React to what the streamer just said.';
     }

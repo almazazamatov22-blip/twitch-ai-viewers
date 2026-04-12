@@ -148,6 +148,28 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
 .af{padding:7px 11px;border-top:1px solid var(--b1);flex-shrink:0}
 .sab{width:100%;padding:6px;background:var(--ca);border:1px solid var(--b2);border-radius:6px;color:var(--tx2);cursor:pointer;font-size:11px;font-family:inherit}
 .sab:hover{border-color:var(--pu);color:var(--pl)}
+/* ACCOUNTS FULL PAGE */
+.acc-layout{display:grid;grid-template-columns:300px 1fr;height:100%;overflow:hidden;min-height:0}
+.acc-left{background:var(--sf);border-right:1px solid var(--b1);display:flex;flex-direction:column;overflow:hidden}
+.acc-right{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.acc-right-head{padding:10px 16px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;background:var(--sf)}
+.acc-right-body{flex:1;overflow-y:auto;padding:12px 16px;min-height:0}
+.acc-right-body::-webkit-scrollbar{width:4px}
+.acc-right-body::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+/* tr toggle on each bot card */
+.tr-tog{width:22px;height:22px;border-radius:4px;border:1px solid var(--b2);background:transparent;color:var(--tx3);cursor:pointer;font-size:9px;font-weight:700;font-family:inherit;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;line-height:1}
+.tr-tog.on{background:rgba(124,58,237,.25);border-color:var(--pu);color:var(--pl)}
+.tr-tog:hover:not(.on){border-color:var(--pl);color:var(--pl)}
+/* transcript blocks in acc-right */
+.tr-block{background:var(--ca);border:1px solid var(--b1);border-radius:8px;padding:10px;margin-bottom:10px}
+.tr-heard{margin-bottom:8px}
+.tr-heard-label{font-size:10px;color:var(--tx3);margin-bottom:4px}
+.tr-heard-text{font-size:12px;color:var(--pl);font-weight:500;line-height:1.4}
+.tr-responses{display:flex;flex-direction:column;gap:5px}
+.tr-resp{display:flex;align-items:flex-start;gap:8px;padding:5px 7px;background:var(--sf);border-radius:5px}
+.tr-resp-name{font-size:10px;font-weight:600;min-width:70px;flex-shrink:0}
+.tr-resp-msg{flex:1;font-size:11px;color:var(--tx);line-height:1.4;word-break:break-word}
+.tr-resp-meta{font-size:9px;color:var(--tx3);white-space:nowrap;flex-shrink:0}
 /* FULL PAGES */
 .fp{position:fixed;inset:44px 0 0;background:var(--bg);z-index:50;display:none;flex-direction:column}
 .fp-head{padding:14px 20px;border-bottom:1px solid var(--b1);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
@@ -213,7 +235,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
       <button class="tab on" onclick="switchTab('chat',this)">Чат</button>
       <button class="tab" onclick="switchTab('accounts',this)">Аккаунты</button>
       <button class="tab" onclick="switchTab('phrases',this)">Фразы ✎</button>
-      <button class="tab" onclick="switchTab('transcript',this)">Транскрипция 🎙</button>
+      
       <button class="tab" onclick="switchTab('learn',this)">Обучение 📚</button>
     </div>
   </div>
@@ -339,6 +361,66 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
   </div>
 </div>
 
+
+<!-- ACCOUNTS PAGE (full width) -->
+<div class="fp" id="accounts-page" style="display:none">
+  <div class="acc-layout">
+    <!-- LEFT: bot list -->
+    <div class="acc-left">
+      <div class="ah">
+        <div class="albl">Аккаунты</div>
+        <div class="atabs">
+          <button class="at on" onclick="setMode('sel',this)">Выбранные</button>
+          <button class="at" onclick="setMode('rnd',this)">Случайный</button>
+          <button class="at" onclick="setMode('ord',this)">По порядку</button>
+        </div>
+        <div class="bpt-row">
+          <span class="bpt-label">Отвечают на транскрипцию:</span>
+          <input class="bpt-input" id="bpt-input2" type="number" min="1" max="99" value="2"
+            onchange="setBPT(Math.max(1,parseInt(this.value)||1))"
+            onkeydown="if(event.key==='Enter')this.blur()">
+          <span class="bpt-hint" id="bpt-hint2">из 0</span>
+        </div>
+        <div class="presence-info">
+          👁 <b>Присутствие 100%</b> — каждый бот смотрит стрим через свой токен. Баллы накапливаются автоматически.
+        </div>
+        <div style="margin-bottom:5px;display:flex;gap:5px">
+          <a class="nb" id="tw-link2" href="#" target="_blank" style="flex:1;justify-content:center">↗ Открыть канал</a>
+          <button class="claim-btn" onclick="claimPoints()">🎁 Баллы</button>
+        </div>
+        <div class="asrch">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="color:var(--tx3);flex-shrink:0"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input placeholder="Поиск бота" oninput="filterAccFull(this.value)">
+        </div>
+        <!-- Legend -->
+        <div style="display:flex;gap:10px;padding:4px 0;font-size:10px;color:var(--tx3)">
+          <span>🟣 — выбран для чата</span>
+          <span style="margin-left:4px"><span style="color:var(--pl);font-weight:700">Т</span> — отвечает на транскрипцию</span>
+        </div>
+      </div>
+      <div class="al" id="al2" style="min-height:0"></div>
+      <div class="af">
+        <div style="display:flex;gap:6px">
+          <button class="sab" style="flex:1" onclick="selAll()">Выбрать всех (чат)</button>
+          <button class="sab" style="flex:1" onclick="selAllTranscript()">Выбрать всех (Т)</button>
+        </div>
+      </div>
+    </div>
+    <!-- RIGHT: transcript feed -->
+    <div class="acc-right">
+      <div class="acc-right-head">
+        <span style="font-size:12px;font-weight:600;color:var(--tx2)">🎙 Транскрипция — что услышал Groq и как ответили боты</span>
+        <button class="nb" onclick="loadTranscript();renderTranscriptAcc()">↻ Обновить</button>
+      </div>
+      <div class="acc-right-body" id="tr-body2">
+        <div style="text-align:center;padding:40px;color:var(--tx3);font-size:12px">
+          Нажми ↻ Обновить или дождись следующей транскрипции
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- TRANSCRIPT PAGE -->
 <div class="fp" id="transcript-page">
   <div class="fp-head">
@@ -458,6 +540,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
 <script>
 const socket = io();
 let bots={}, sendMode='sel', ordIdx=0, startTime=null, uptTimer=null;
+let transcriptBots=new Set(); // usernames that respond to transcription
 let channelName='', errCnt=0, replyTo=null, editingGroup=null, editingPersonaUser=null;
 let personas={}, PG={};
 let botsPerTranscript=2, totalBots=0;
@@ -550,6 +633,7 @@ socket.on('config', cfg => {
     document.getElementById('twitch-open').href=url;
     document.getElementById('twitch-open').textContent='↗ '+channelName;
     document.getElementById('tw-link').href=url;
+    const tl2=document.getElementById('tw-link2');if(tl2)tl2.href=url;
     loadEmbed(channelName);
   }
 });
@@ -560,15 +644,17 @@ socket.on('bots:started', d => {
   document.getElementById('gst').textContent='Запущено';
   totalBots=d.bots.length;
   ['ma','sb-acc','sb-auth'].forEach(id=>document.getElementById(id).textContent=d.bots.length);
-  d.bots.forEach(u=>{const k=u.toLowerCase();if(!bots[k])bots[k]={display:u,state:'connecting',msgs:0,sel:true,presence:false};});
-  renderAcc(); renderBPT();
+  d.bots.forEach(u=>{const k=u.toLowerCase();if(!bots[k])bots[k]={display:u,state:'connecting',msgs:0,sel:true,trSel:true,presence:false};transcriptBots.add(k);});
+  renderAcc(); renderAccFull(); renderBPT(); syncBPTInputs();
+  // sync tw-link2
+  const tl2=document.getElementById('tw-link2');if(tl2&&channelName)tl2.href='https://www.twitch.tv/'+channelName;
   sysMsg('✅ '+d.bots.length+' ботов · пишут ТОЛЬКО на транскрипцию стрима · присутствие 100%');
   toast('ok','✅ '+d.bots.length+' ботов запущено');
 });
 
 socket.on('bot:status', d=>{
   const k=d.username.toLowerCase();
-  if(!bots[k]) bots[k]={display:d.username,state:d.state,msgs:0,sel:true,presence:false,points:null};
+  if(!bots[k]){bots[k]={display:d.username,state:d.state,msgs:0,sel:true,trSel:true,presence:false,points:null};transcriptBots.add(k);}
   else { bots[k].state=d.state; bots[k].display=d.username; }
   updDot(k,d.state,d.message);
 });
@@ -588,6 +674,7 @@ socket.on('transcription:new', d=>{
   currentSession={heard:d.text, timestamp:d.timestamp, responses:[]};
   transcriptSessions.unshift(currentSession);
   if(transcriptSessions.length>50) transcriptSessions.pop();
+  if(document.getElementById('accounts-page').style.display!=='none') renderTranscriptAcc();
 });
 
 // Bot responded to transcription
@@ -597,6 +684,7 @@ socket.on('transcript:entry', d=>{
   }
   // If transcript page is open, refresh
   if(document.getElementById('transcript-page').style.display!=='none') renderTranscriptPage();
+  if(document.getElementById('accounts-page').style.display!=='none') renderTranscriptAcc();
 });
 
 socket.on('personas:update', data=>{ personas=data||{}; renderAcc(); });
@@ -641,6 +729,13 @@ function renderBPT(){
   const hint=document.getElementById('bpt-hint');
   if(inp) inp.value=botsPerTranscript;
   if(hint) hint.textContent='из '+(totalBots||0);
+  syncBPTInputs();
+}
+function syncBPTInputs(){
+  const inp2=document.getElementById('bpt-input2');
+  const hint2=document.getElementById('bpt-hint2');
+  if(inp2) inp2.value=botsPerTranscript;
+  if(hint2) hint2.textContent='из '+(totalBots||0);
 }
 function setBPT(n){
   n=Math.max(1,Math.min(n,totalBots||99));
@@ -733,6 +828,50 @@ function updDot(k,state,msg){
 function togSel(k){bots[k].sel=!bots[k].sel;renderAcc();}
 function selAll(){const all=Object.values(bots).every(b=>b.sel);Object.keys(bots).forEach(k=>bots[k].sel=!all);renderAcc();}
 function filterAcc(v){renderAcc(v);}
+function filterAccFull(v){renderAccFull(v);}
+function togTrSel(k){
+  bots[k].trSel=!bots[k].trSel;
+  if(bots[k].trSel) transcriptBots.add(k); else transcriptBots.delete(k);
+  // emit to server
+  socket.emit('set:transcript_bots',{usernames:[...transcriptBots]});
+  renderAccFull();
+}
+function selAllTranscript(){
+  const allOn=Object.keys(bots).every(k=>bots[k].trSel);
+  Object.keys(bots).forEach(k=>{bots[k].trSel=!allOn;if(!allOn)transcriptBots.add(k);else transcriptBots.delete(k);});
+  socket.emit('set:transcript_bots',{usernames:[...transcriptBots]});
+  renderAccFull();
+}
+function renderAccFull(filter=''){
+  const list=document.getElementById('al2'); if(!list)return;
+  const keys=Object.keys(bots).filter(k=>!filter||k.includes(filter.toLowerCase()));
+  if(!keys.length){list.innerHTML='<div style="text-align:center;padding:30px;color:var(--tx3);font-size:12px">Нет аккаунтов</div>';return;}
+  list.innerHTML='';
+  keys.forEach(k=>{
+    const b=bots[k], color=bc(k), name=b.display||k;
+    const dc=b.state==='connected'?'on':b.state==='connecting'||b.state==='reconnecting'?'cn':b.state==='error'?'err':'';
+    const p=personas[k]||personas[name.toLowerCase()];
+    const d=document.createElement('div');
+    d.className='ait'+(b.sel?' sel':''); d.id='ai2-'+k;
+    d.innerHTML=`<div class="ava" style="background:${color}" onclick="togSel('${k}');renderAccFull()">${name[0].toUpperCase()}</div>
+      <div class="ain" onclick="togSel('${k}');renderAccFull()">
+        <div class="ain-n">${esc(name)}</div>
+        <div class="ain-s">${b.state}</div>
+        <div class="ain-p">🧠 ${esc(p?p.role:'не задана')}</div>
+        <div class="ain-pts" id="pts2-${k}">${b.points!=null?'🪙 '+b.points.toLocaleString()+' pts':''}</div>
+        <div class="ain-pres"><span class="sdot ${b.presence?'watch':''}" id="pdot2-${k}" style="width:6px;height:6px"></span><span style="font-size:10px;color:${b.presence?'var(--yw)':'var(--tx3)'}"> ${b.presence?'смотрит стрим':'ожидание стрима'}</span></div>
+      </div>
+      <div class="air">
+        <div style="display:flex;align-items:center;gap:4px">
+          <button class="tr-tog${b.trSel?' on':''}" title="Отвечает на транскрипцию" onclick="event.stopPropagation();togTrSel('${k}')">Т</button>
+          <button class="epbtn" title="Редактировать личность" onclick="openPersona('${esc(name)}')">✎</button>
+          <div class="adot ${dc}" id="adot2-${k}"></div>
+        </div>
+        <div class="amsg" id="amsg2-${k}">${b.msgs||0} msg</div>
+      </div>`;
+    list.appendChild(d);
+  });
+}
 function setMode(m,btn){sendMode=m;document.querySelectorAll('.at').forEach(t=>t.classList.remove('on'));btn.classList.add('on');}
 function getTargets(){
   const conn=Object.keys(bots).filter(k=>bots[k].state==='connected');
@@ -843,6 +982,29 @@ function renderTranscriptPage(){
     body.appendChild(block);
   });
 }
+function renderTranscriptAcc(){
+  const body=document.getElementById('tr-body2'); if(!body)return;
+  body.innerHTML='';
+  if(!transcriptSessions.length){
+    body.innerHTML='<div style="text-align:center;padding:40px;color:var(--tx3);font-size:12px">Ожидание транскрипции... Стрим должен идти.</div>';
+    return;
+  }
+  transcriptSessions.forEach(sess=>{
+    const block=document.createElement('div'); block.className='tr-block';
+    const t=new Date(sess.timestamp).toTimeString().slice(0,8);
+    let rHtml='';
+    if(sess.responses.length){
+      rHtml=sess.responses.map(r=>{
+        const color=bc(r.username.toLowerCase());
+        return `<div class="tr-resp"><div class="tr-resp-name" style="color:${color}">${esc(r.username)}</div><div class="tr-resp-msg">${esc(r.message)}</div><div class="tr-resp-meta">${new Date(r.timestamp).toTimeString().slice(0,8)}</div></div>`;
+      }).join('');
+    } else {
+      rHtml='<div style="font-size:11px;color:var(--tx3);padding:6px 0;font-style:italic">Боты ещё не ответили...</div>';
+    }
+    block.innerHTML=`<div class="tr-heard"><div class="tr-heard-label">🎙 ${t}</div><div class="tr-heard-text">${esc(sess.heard)}</div></div><div class="tr-responses">${rHtml}</div>`;
+    body.appendChild(block);
+  });
+}
 async function loadTranscript(){
   // Also try to fetch from server for older entries
   try{
@@ -882,9 +1044,10 @@ function switchTab(tab,btn){
   const pl=document.getElementById('panel-left'),pc=document.getElementById('panel-center');
   const pr=document.getElementById('panel-right');
   const pp=document.getElementById('phrase-page'),tp=document.getElementById('transcript-page'),lp=document.getElementById('learn-page');
+  pr.style.display='';
   pl.style.display='';pc.style.display='';pr.style.display='';pr.style.width='';
-  pp.style.display='none';tp.style.display='none';lp.style.display='none';
-  if(tab==='accounts'){pl.style.display='none';pc.style.display='none';pr.style.width='100%';}
+  pp.style.display='none';tp.style.display='none';lp.style.display='none';document.getElementById('accounts-page').style.display='none';
+  if(tab==='accounts'){pl.style.display='none';pc.style.display='none';pr.style.display='none';document.getElementById('accounts-page').style.display='flex';}
   else if(tab==='phrases'){pl.style.display='none';pc.style.display='none';pr.style.display='none';pp.style.display='flex';renderPGPage();}
   else if(tab==='transcript'){pl.style.display='none';pc.style.display='none';pr.style.display='none';tp.style.display='flex';renderTranscriptPage();}
   else if(tab==='learn'){pl.style.display='none';pc.style.display='none';pr.style.display='none';lp.style.display='flex';if(!window.learnInit)initLearnTab();}

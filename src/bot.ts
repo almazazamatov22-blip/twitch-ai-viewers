@@ -130,16 +130,17 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
           
           // 100% Markov Chain generation with AI verification
           if (this.learnBot && this.learnBot.hasEnoughData && this.learnBot.hasEnoughData(100)) {
-            // First try to generate from transcript context (learned from stream audio)
+            // Generate unique for each bot using bot username as seed
+            const seed = bot.username + Date.now();
             let markovGen = '';
             if (this.learnBot.generateFromTranscript) {
-              markovGen = this.learnBot.generateFromTranscript(text) || '';
+              markovGen = this.learnBot.generateFromTranscript(text + seed) || '';
             }
             // Fallback to regular markov if no transcript context
             if (!markovGen || markovGen.length < 5) {
               markovGen = this.learnBot.generateWithContext ? 
-                this.learnBot.generateWithContext(text, 5) : 
-                this.learnBot.generate();
+                this.learnBot.generateWithContext(text + seed, 5) : 
+                this.learnBot.generate(seed);
             }
             
             if (markovGen && markovGen.length > 5) {

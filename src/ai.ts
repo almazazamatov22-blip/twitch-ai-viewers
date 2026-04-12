@@ -220,17 +220,17 @@ Streamer said: "${transcription}"
 Generated (from learned chat): "${markovText}"
 
 Check if this response makes sense given the current stream context.
-IMPORTANT: If the generated message mentions names, places, or topics from the learned chat that don't match the current stream - REJECT and say "REJECT".
-If ok, rewrite it to be casual and relevant.
+IMPORTANT: You MUST make it unique and different - add variations, synonyms, casual slang.
+NEVER repeat the same words exactly. Be creative.
 Rules: 1-6 words, max 30 chars, no @mentions, no punctuation, casual simple human messages.
-Output only the message, or "REJECT" if irrelevant.`;
+Output ONLY the message.`;
     
     try {
       console.log('[ai] verifyAndFix for', username, 'markov:', markovText.slice(0, 50));
       const res = await this.groq.chat.completions.create({
         model: 'llama-3.1-8b-instant',
         max_tokens: 20,
-        temperature: 0.3,
+        temperature: 0.7 + Math.random() * 0.5, // Random temperature for variety
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: userPrompt },

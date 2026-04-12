@@ -44,6 +44,15 @@ const transcriptHistory = reactive([])
 const learning = ref(false)
 const learnStats = reactive({ messages: 0, words: 0 })
 const learnLogs = reactive([])
+const learnChannel = ref('')
+const learnBotCount = ref(0)
+const learnTranscriptDuration = ref(15)
+
+function setLearnChannel() {
+  if (!learnChannel.value) return
+  socket.value.emit('learn:setChannel', { channel: learnChannel.value })
+  learnLogs.push('Канал изменён на ' + learnChannel.value)
+}
 
 function startLearning() {
   learning.value = true
@@ -184,6 +193,11 @@ onMounted(() => {
     learning.value = data.running
     learnStats.messages = data.messages
     learnStats.words = data.words
+  })
+  
+  s.on('learn:config', data => {
+    if (data.channel) learnChannel.value = data.channel
+    if (data.tokens) learnBotCount.value = data.tokens
   })
   
   s.on('learn:log', msg => {
@@ -459,9 +473,16 @@ const themeOverrides = {
                   </div>
                   
                   <n-card title="Настройка обучения">
-                    <n-alert type="warning">
-                      Настройки берутся из Variables: LEARN_CHANNEL и LEARN_OAUTH
-                    </n-alert>
+                    <n-space vertical>
+                      <n-input-group>
+                        <n-input-group-label>Канал:</n-input-group-label>
+                        <n-input v-model:value="learnChannel" placeholder="baz1221" style="width: 200px" />
+                        <n-button type="primary" @click="setLearnChannel">Сохранить</n-button>
+                      </n-input-group>
+                      <n-alert type="info" :caption="'Текущий канал: ' + learnChannel">
+                        Боты: {{ learnBotCount }} | Транскрипция: {{ learnTranscriptDuration }}с
+                      </n-alert>
+                    </n-space>
                     <n-divider />
                     <n-space>
                       <n-button type="primary" @click="startLearning" :disabled="learning">Старт</n-button>

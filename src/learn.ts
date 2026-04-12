@@ -1,8 +1,6 @@
 import * as tmi from 'tmi.js';
 import * as fs from 'fs';
-import * as path from 'path';
-import * as Groq from 'groq-sdk';
-import { spawn } from 'child_process';
+import { TranscriptionService } from './transcription';
 
 interface MarkovChain {
   [key: string]: string[];
@@ -17,105 +15,148 @@ export class LearnBot {
   private clients: BotClient[] = [];
   private chain: MarkovChain = {};
   private starts: string[] = [];
-  private transcriptChain: MarkovChain = {}; // transcription -> responses
-  private transcriptStarts: string[] = [];
+  // Context chain: "what streamer said" → "what chat replied"
+  private contextChain: MarkovChain = {};
   private keyLength = 2;
   private messages = 0;
   private words = 0;
   private running = false;
   private emit: (event: string, data: any) => void;
-  private groqKey: string = '';
-  private channel: string = '';
-  private lastTranscript = ''; // Last transcript for linking with chat
-  private transcriptTime = 0; // When we heard the transcript
-  private recentTranscripts: string[] = []; // Buffer of recent transcripts
+  private transcriptionService: TranscriptionService | null = null;
+
+  // Rolling window of recent transcripts from LEARN_CHANNEL stream audio
+  // Each entry: { text, timestamp }
+  private recentTranscripts: { text: string; timestamp: number }[] = [];
+  private readonly TRANSCRIPT_WINDOW_MS = 45000; // 45 seconds
 
   constructor(emit: (event: string, data: any) => void) {
     this.emit = emit;
   }
 
-  // Called when we receive a chat message - LINK with recent transcript
+  // ── Transcript intake ──────────────────────────────────────────────────────
+
+  // Called when we receive a new audio transcript from LEARN_CHANNEL
+  private onTranscript(text: string): void {
+    if (!text || text.length < 10) return;
+
+    // Add to rolling window
+    this.recentTranscripts.push({ text, timestamp: Date.now() });
+    // Keep last 20 entries max
+    if (this.recentTranscripts.length > 20) this.recentTranscripts.shift();
+
+    // Learn the transcript itself as a Markov chain
+    // (so we can later match incoming transcripts to learned context)
+    this.learnTranscriptWords(text);
+
+    this.emit('learn:transcript', {
+      text,
+      timestamp: Date.now(),
+      source: 'learn_channel',
+    });
+
+    console.log('[learn] Transcript from LEARN_CHANNEL:', text.slice(0, 100));
+  }
+
+  // ── Chat message intake ────────────────────────────────────────────────────
+
+  // Called on every incoming chat message from LEARN_CHANNEL
   learnChatMessage(msg: string): void {
-    const now = Date.now();
     const words = msg.toLowerCase().split(/\s+/).filter(w => w.length > 1);
     if (words.length < 2) return;
-    
-    // If recent transcript exists (within last 30 seconds), link them
-    if (this.lastTranscript && now - this.transcriptTime < 30000) {
-      this.learnWithContext(this.lastTranscript, msg);
+
+    // Find the most recent transcript within the window
+    const recentTranscript = this.getRecentTranscript();
+
+    if (recentTranscript) {
+      // Link chat response to what the streamer said
+      this.learnWithContext(recentTranscript, msg);
     }
-    
+
+    // Always learn the raw chat message too
     this.learn(msg);
+
     this.messages++;
     this.emit('learn:status', {
       running: this.running,
       messages: this.messages,
       words: this.words,
     });
-    if (this.messages % 100 === 0) {
-      this.emit('learn:log', `Изучено ${this.messages} сообщений`);
+    if (this.messages % 50 === 0) {
+      const ctxSize = Object.keys(this.contextChain).length;
+      this.emit('learn:log',
+        `📊 ${this.messages} сообщений | ${ctxSize} контекстных связей`
+      );
     }
   }
 
-  // Called when we hear a transcript from stream audio
-  onTranscript(text: string): void {
-    if (!text || text.length < 10) return;
-    this.lastTranscript = text;
-    this.transcriptTime = Date.now();
-    this.recentTranscripts.push(text);
-    if (this.recentTranscripts.length > 10) this.recentTranscripts.shift();
-    
-    // Also learn transcript chain itself for generation
-    this.learnTranscript(text);
+  // Returns the most recent transcript that's still within the time window
+  private getRecentTranscript(): string | null {
+    const cutoff = Date.now() - this.TRANSCRIPT_WINDOW_MS;
+    // Walk from newest to oldest
+    for (let i = this.recentTranscripts.length - 1; i >= 0; i--) {
+      if (this.recentTranscripts[i].timestamp >= cutoff) {
+        return this.recentTranscripts[i].text;
+      }
+    }
+    return null;
   }
 
-  // Learn that "when said X, chat responded with Y"
-  learnWithContext(transcript: string, response: string): void {
-    if (!transcript || transcript.length < 10 || !response || response.length < 2) return;
+  // ── Context learning: streamer said X → chat replied Y ────────────────────
+
+  private learnWithContext(transcript: string, chatMsg: string): void {
+    if (!transcript || !chatMsg) return;
     const tWords = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    const rWords = response.toLowerCase().split(/\s+/).filter(w => w.length > 1);
-    if (tWords.length < 2 || rWords.length < 1) return;
-    // Key = first few words of transcript
-    const tKey = tWords.slice(0, Math.min(3, tWords.length)).join(' ');
-    if (!this.transcriptChain[tKey]) this.transcriptChain[tKey] = [];
-    this.transcriptChain[tKey].push(rWords.slice(0, 4).join(' '));
+    const cWords = chatMsg.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+    if (tWords.length < 2 || cWords.length < 1) return;
+
+    // Use a 2–3 word key from the beginning of the transcript
+    const keyLen = Math.min(3, tWords.length);
+    const key = tWords.slice(0, keyLen).join(' ');
+    if (!this.contextChain[key]) this.contextChain[key] = [];
+    // Store the first 5 words of the chat reply
+    this.contextChain[key].push(cWords.slice(0, 5).join(' '));
+    // Cap each key at 50 entries
+    if (this.contextChain[key].length > 50) this.contextChain[key].shift();
   }
 
-  // Just learn transcript words (for generateFromTranscript)
-  learnTranscript(text: string): void {
+  // ── Markov helpers ────────────────────────────────────────────────────────
+
+  private learnTranscriptWords(text: string): void {
     if (!text || text.length < 10) return;
     const words = text.trim().split(/\s+/).filter(w => w.length > 0);
     if (words.length < 3) return;
     for (let i = 0; i <= words.length - this.keyLength; i++) {
-      const key = words.slice(i, i + this.keyLength).join(' ');
+      const key = words.slice(i, i + this.keyLength).join(' ').toLowerCase();
       const next = words[i + this.keyLength];
       if (!next) continue;
-      if (i === 0) {
-        if (!this.transcriptStarts.includes(key)) this.transcriptStarts.push(key);
-      }
-      if (!this.transcriptChain[key]) this.transcriptChain[key] = [];
-      this.transcriptChain[key].push(next);
+      if (!this.contextChain[key]) this.contextChain[key] = [];
+      this.contextChain[key].push(next.toLowerCase());
     }
   }
 
-  // Generate from transcript context - what would chat say?
-  generateFromTranscript(transcript: string): string {
-    if (Object.keys(this.transcriptChain).length === 0) return '';
-    const words = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
-    let matchingKey = '';
-    // Find longest matching key
-    for (let i = words.length - 1; i >= 0; i--) {
-      const key = words.slice(Math.max(0, i - 1), i + 1).join(' ');
-      if (this.transcriptChain[key] && this.transcriptChain[key].length > 0) {
-        matchingKey = key;
-        break;
-      }
+  private learn(text: string): void {
+    const words = text.trim().split(/\s+/).filter(
+      w => w.length > 0 && !w.startsWith('http')
+    );
+    if (words.length < 2) return;
+    this.words += words.length;
+    for (let i = 0; i <= words.length - this.keyLength; i++) {
+      const key = words.slice(i, i + this.keyLength).join(' ');
+      const next = words[i + this.keyLength];
+      if (i === 0) this.starts.push(key);
+      if (!this.chain[key]) this.chain[key] = [];
+      this.chain[key].push(next);
     }
-    if (!matchingKey) return '';
-    const result: string[] = matchingKey.split(' ');
-    let current = matchingKey;
-    for (let i = 0; i < 10; i++) {
-      const options = this.transcriptChain[current];
+  }
+
+  // ── Generation ─────────────────────────────────────────────────────────────
+
+  generate(start?: string): string {
+    if (Object.keys(this.chain).length === 0) return '';
+    let current = start || this.starts[Math.floor(Math.random() * this.starts.length)];
+    const result = current.split(' ');
+    for (let i = 0; i < 20; i++) {
+      const options = this.chain[current];
       if (!options || options.length === 0) break;
       const next = options[Math.floor(Math.random() * options.length)];
       result.push(next);
@@ -124,50 +165,107 @@ export class LearnBot {
     return result.join(' ');
   }
 
-  async start(channel: string, tokens: string[], groqKey?: string): Promise<void> {
-    if (this.running) return;
-    
-    this.channel = channel.toLowerCase().replace(/^#/, '');
-    this.groqKey = groqKey || '';
-    
-    // Start transcription if we have groqKey
-    if (this.groqKey) {
-      this.emit('learn:log', 'Запуск транскрипции для ' + this.channel);
-      this.startTranscription();
-    } else {
-      this.emit('learn:log', 'ВНИМАНИЕ: GROQ_API_KEY не установлен - транскрипция не будет работать');
+  generateWithContext(context: string, minWords = 5): string {
+    if (Object.keys(this.chain).length === 0) return '';
+    const contextWords = context.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+    const matchingStarts: string[] = [];
+    for (const word of contextWords) {
+      for (const start of this.starts) {
+        if (start.toLowerCase().includes(word)) matchingStarts.push(start);
+      }
     }
-    
-    const chan = this.channel;
-    this.emit('learn:log', `Запуск ${tokens.length} ботов на канале ${chan}`);
-    
+    let result = '';
+    if (matchingStarts.length > 0) {
+      result = this.generate(matchingStarts[Math.floor(Math.random() * matchingStarts.length)]);
+    }
+    if (!result || result.split(' ').length < minWords) result = this.generate();
+    return result;
+  }
+
+  // Generate a chat-style reply given what the streamer just said.
+  // Looks up the contextChain first (streamer speech → chat reply),
+  // then falls back to regular chat generation.
+  generateFromTranscript(transcript: string): string {
+    if (!transcript) return '';
+    const words = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+
+    // Try context chain first (longer keys preferred)
+    for (let len = Math.min(3, words.length); len >= 1; len--) {
+      const key = words.slice(0, len).join(' ');
+      const options = this.contextChain[key];
+      if (options && options.length > 0) {
+        const base = options[Math.floor(Math.random() * options.length)];
+        console.log('[learn] generateFromTranscript: context match key="' + key + '" → "' + base + '"');
+        return base;
+      }
+    }
+
+    // Also try mid-transcript keys
+    for (let i = 1; i < words.length - 1; i++) {
+      for (let len = Math.min(3, words.length - i); len >= 1; len--) {
+        const key = words.slice(i, i + len).join(' ');
+        const options = this.contextChain[key];
+        if (options && options.length > 0) {
+          const base = options[Math.floor(Math.random() * options.length)];
+          console.log('[learn] generateFromTranscript: mid-match key="' + key + '" → "' + base + '"');
+          return base;
+        }
+      }
+    }
+
+    return '';
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────────────
+
+  async start(
+    channel: string,
+    tokens: string[],
+    groqKey?: string,
+    language = 'ru',
+    learnChunkSecs = 15
+  ): Promise<void> {
+    if (this.running) return;
+
+    const chan = channel.toLowerCase().replace(/^#/, '');
+
+    // ── Start transcription for LEARN_CHANNEL ──────────────────────────────
+    if (groqKey) {
+      this.emit('learn:log', `🎙 Запуск транскрипции LEARN_CHANNEL: ${chan}`);
+      const safeSecs = Math.max(10, learnChunkSecs);
+      this.transcriptionService = new TranscriptionService(groqKey, chan, language, safeSecs);
+      this.transcriptionService.start((result) => {
+        this.onTranscript(result.text);
+      });
+      this.emit('learn:log', `✅ Транскрипция запущена (канал: ${chan}, язык: ${language}, чанк: ${safeSecs}с)`);
+    } else {
+      this.emit('learn:log', '⚠️ GROQ_API_KEY не установлен — транскрипция не работает');
+    }
+
+    // ── Connect chat listeners ─────────────────────────────────────────────
+    this.emit('learn:log', `Подключение ${tokens.length} ботов к чату ${chan}...`);
+
     for (let i = 0; i < tokens.length; i++) {
       const token = tokens[i];
-      const username = 'bot' + (i + 1);
-      
+      const username = 'learn_bot_' + (i + 1);
       try {
         const client = tmi.client({
           channels: [chan],
-          identity: {
-            username: username,
-            password: token,
-          },
-          options: {
-            debug: false,
-          },
+          identity: { username, password: token },
+          options: { debug: false },
         });
 
-        client.on('message', (chan, tags, msg, self) => {
+        client.on('message', (_ch, _tags, msg, self) => {
           if (self) return;
-          this.learnChatMessage(msg); // Links chat with recent transcript
+          this.learnChatMessage(msg);
         });
 
         client.on('connected', () => {
-          this.emit('learn:log', `✅ ${username} подключен`);
+          this.emit('learn:log', `✅ ${username} подключён к ${chan}`);
         });
 
         client.on('disconnected', () => {
-          this.emit('learn:log', `❌ ${username} отключен`);
+          this.emit('learn:log', `❌ ${username} отключён`);
         });
 
         client.connect();
@@ -178,7 +276,8 @@ export class LearnBot {
     }
 
     this.running = true;
-    this.emit('learn:log', `Обучение началось`);
+    this.emit('learn:log', `📚 Обучение началось на канале ${chan}`);
+    this.emit('learn:log', `🎙 Транскрипция: ${groqKey ? 'вкл' : 'выкл'} | Чат: вкл`);
     this.emit('learn:status', {
       running: true,
       messages: this.messages,
@@ -186,87 +285,22 @@ export class LearnBot {
     });
   }
 
-  // Start transcription to learn from stream audio
-  private async startTranscription(): Promise<void> {
-    if (!this.groqKey || !this.channel) return;
-    
-    const GroqSDK = require('groq-sdk');
-    const groq = new GroqSDK({ apiKey: this.groqKey });
-    const tmpDir = '/tmp';
-    let stopped = false;
-    
-    const capture = async () => {
-      if (stopped || this.running === false) return;
-      
-      const outFile = tmpDir + '/learn-audio-' + Date.now() + '.wav';
-      try {
-        const link = spawn('streamlink', [
-          '--quiet', '--twitch-low-latency',
-          'https://twitch.tv/' + this.channel,
-          'audio_only,worst',
-          '--stdout',
-        ], { timeout: 65000 });
-        
-        const ffmpeg = spawn('ffmpeg', [
-          '-i', 'pipe:0',
-          '-t', '50',
-          '-vn', '-ar', '16000',
-          '-ac', '1',
-          '-c:a', 'pcm_s16le',
-          outFile
-        ]);
-        
-        link.stdout.pipe(ffmpeg.stdin);
-        
-        let done = false;
-        ffmpeg.on('close', async () => {
-          if (done) return;
-          done = true;
-          if (stopped) return;
-          
-          try {
-            const stat = fs.statSync(outFile);
-            if (stat.size > 5000) {
-              const audio = fs.readFileSync(outFile);
-              const text = await groq.audio.transcriptions.create({
-                file: new File([audio], 'audio.wav', { type: 'audio/wav' }),
-                language: 'ru'
-              });
-              
-              const transcript = (text as any)?.text?.trim();
-              if (transcript && transcript.length > 10) {
-                console.log('[learn] Transcript heard:', transcript.slice(0, 80));
-                this.onTranscript(transcript);
-                this.emit('learn:transcript', transcript);
-              }
-            }
-          } catch (e: any) {
-            // silent fail - stream might be offline
-          }
-          try { fs.unlinkSync(outFile); } catch {}
-          setTimeout(capture, 3000);
-        });
-      } catch (e: any) {
-        setTimeout(capture, 10000);
-      }
-    };
-    
-    capture();
-    this.emit('learn:log', 'Транскрипция включена');
-  }
-
   stop(): void {
-    // Stop transcription
     this.running = false;
-    
+
+    // Stop transcription
+    if (this.transcriptionService) {
+      this.transcriptionService.stop();
+      this.transcriptionService = null;
+    }
+
+    // Disconnect chat bots
     for (const bot of this.clients) {
-      try {
-        bot.client.disconnect();
-      } catch (e) {}
+      try { bot.client.disconnect(); } catch { /* ignore */ }
     }
     this.clients = [];
-    this.running = false;
-    this.emit('learn:log', 'Обучение остановлено');
+
+    this.emit('learn:log', '🛑 Обучение остановлено');
     this.emit('learn:status', {
       running: false,
       messages: this.messages,
@@ -274,89 +308,9 @@ export class LearnBot {
     });
   }
 
-  private learn(text: string): void {
-    const words = text.trim().split(/\s+/).filter(w => w.length > 0 && !w.startsWith('http'));
-    if (words.length < 2) return;
+  // ── Data API ───────────────────────────────────────────────────────────────
 
-    this.words += words.length;
-
-    for (let i = 0; i <= words.length - this.keyLength; i++) {
-      const key = words.slice(i, i + this.keyLength).join(' ');
-      const next = words[i + this.keyLength];
-
-      if (i === 0) {
-        this.starts.push(key);
-      }
-
-      if (!this.chain[key]) {
-        this.chain[key] = [];
-      }
-      this.chain[key].push(next);
-    }
-  }
-
-  generate(start?: string): string {
-    if (Object.keys(this.chain).length === 0) return '';
-
-    let current = start || this.starts[Math.floor(Math.random() * this.starts.length)];
-    const result = current.split(' ');
-
-    for (let i = 0; i < 20; i++) {
-      const options = this.chain[current];
-      if (!options || options.length === 0) break;
-
-      const next = options[Math.floor(Math.random() * options.length)];
-      result.push(next);
-      current = result.slice(-this.keyLength).join(' ');
-    }
-
-    return result.join(' ');
-  }
-
-  generateWithContext(context: string, minWords: number = 5): string {
-    if (Object.keys(this.chain).length === 0) return '';
-    
-    const contextWords = context.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-    const matchingStarts: string[] = [];
-    
-    for (const word of contextWords) {
-      for (const start of this.starts) {
-        if (start.toLowerCase().includes(word)) {
-          matchingStarts.push(start);
-        }
-      }
-    }
-    
-    let result = '';
-    if (matchingStarts.length > 0) {
-      result = this.generate(matchingStarts[Math.floor(Math.random() * matchingStarts.length)]);
-    }
-    
-    if (!result || result.split(' ').length < minWords) {
-      result = this.generate();
-    }
-    
-    return result;
-  }
-
-  getTopPhrases(count: number = 10): string[] {
-    const phraseCounts: Record<string, number> = {};
-    
-    for (const key of Object.keys(this.chain)) {
-      const phrases = this.chain[key];
-      if (phrases.length > 1) {
-        const phrase = key + ' ' + phrases[0];
-        phraseCounts[phrase] = (phraseCounts[phrase] || 0) + phrases.length;
-      }
-    }
-    
-    return Object.entries(phraseCounts)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, count)
-      .map(([phrase]) => phrase);
-  }
-
-  hasEnoughData(minMessages: number = 100): boolean {
+  hasEnoughData(minMessages = 100): boolean {
     return this.messages >= minMessages;
   }
 
@@ -364,15 +318,26 @@ export class LearnBot {
     return {
       chain: this.chain,
       starts: this.starts,
-      transcriptChain: this.transcriptChain,
-      transcriptStarts: this.transcriptStarts,
+      contextChain: this.contextChain,
       messages: this.messages,
       words: this.words,
       uniqueWords: Object.keys(this.chain).length,
+      contextLinks: Object.keys(this.contextChain).length,
     };
   }
 
-  generatePreview(count: number = 5): string[] {
+  getStats() {
+    return {
+      messages: this.messages,
+      words: this.words,
+      uniqueWords: Object.keys(this.chain).length,
+      contextLinks: Object.keys(this.contextChain).length,
+      running: this.running,
+      hasTranscription: this.transcriptionService !== null,
+    };
+  }
+
+  generatePreview(count = 5): string[] {
     const results: string[] = [];
     for (let i = 0; i < count; i++) {
       const gen = this.generate();
@@ -381,33 +346,47 @@ export class LearnBot {
     return results;
   }
 
+  getTopPhrases(count = 10): string[] {
+    const phraseCounts: Record<string, number> = {};
+    for (const key of Object.keys(this.chain)) {
+      const phrases = this.chain[key];
+      if (phrases.length > 1) {
+        const phrase = key + ' ' + phrases[0];
+        phraseCounts[phrase] = (phraseCounts[phrase] || 0) + phrases.length;
+      }
+    }
+    return Object.entries(phraseCounts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, count)
+      .map(([phrase]) => phrase);
+  }
+
   saveToFile(filepath: string): void {
-    const data = {
-      chain: this.chain,
-      starts: this.starts,
-      messages: this.messages,
-      words: this.words,
-    };
-    fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
+    fs.writeFileSync(filepath, JSON.stringify(this.getData(), null, 2));
     this.emit('learn:log', `Сохранено в ${filepath}`);
   }
 
-  getStats() {
-    return {
-      messages: this.messages,
-      words: this.words,
-      uniqueWords: Object.keys(this.chain).length,
-      running: this.running,
-    };
-  }
-
-  loadData(data: { chain: MarkovChain; starts: string[]; messages: number; words: number; transcriptChain?: MarkovChain; transcriptStarts?: string[] }): void {
+  loadData(data: {
+    chain: MarkovChain;
+    starts: string[];
+    messages: number;
+    words: number;
+    // Support both old field names and new
+    contextChain?: MarkovChain;
+    transcriptChain?: MarkovChain;
+    transcriptStarts?: string[];
+  }): void {
     this.chain = data.chain || {};
     this.starts = data.starts || [];
-    this.transcriptChain = data.transcriptChain || {};
-    this.transcriptStarts = data.transcriptStarts || [];
+    // Load context chain — handle both old name (transcriptChain) and new (contextChain)
+    this.contextChain = data.contextChain || data.transcriptChain || {};
     this.messages = data.messages || 0;
     this.words = data.words || 0;
-    console.log('[learn] Loaded data:', this.messages, 'messages,', Object.keys(this.chain).length, 'chains,', Object.keys(this.transcriptChain).length, 'transcript chains');
+    console.log(
+      '[learn] Loaded:',
+      this.messages, 'messages,',
+      Object.keys(this.chain).length, 'chat chains,',
+      Object.keys(this.contextChain).length, 'context links'
+    );
   }
 }

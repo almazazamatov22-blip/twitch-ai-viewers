@@ -167,16 +167,25 @@ function readEnvConfig() {
 function readLearnConfig() {
   const learnChan = extractChannel(process.env.LEARN_CHANNEL || '');
   const groqKey = process.env.GROQ_API_KEY?.trim();
+  const language = (process.env.ORIGINAL_STREAM_LANGUAGE || 'ru').trim();
   const bots: { username: string; token: string }[] = [];
   for (let i = 1; i <= 50; i++) {
     const u = process.env['BOT' + i + '_USERNAME']?.trim();
     const t = (process.env['BOT' + i + '_OAUTH'] || process.env['BOT' + i + '_OAUTH_TOKEN'])?.trim();
     if (u && t) bots.push({ username: u, token: t });
   }
+  // LEARN_TRANSCRIPT_DURATION in seconds (default 15s, min 10s, max 60s)
+  // Shorter = more real-time context for learning, more Groq API calls
+  // Recommended: 15 for active learning, 30 for quieter channels
+  const rawLearnDur = parseInt(process.env.LEARN_TRANSCRIPT_DURATION || '15', 10);
+  const learnChunkSecs = Math.max(10, Math.min(60, isNaN(rawLearnDur) ? 15 : rawLearnDur));
+
   return {
     channel: learnChan,
     tokens: bots.map(b => b.token),
     groqKey,
+    language,
+    learnChunkSecs,
   };
 }
 
@@ -607,9 +616,9 @@ io.on('connection', socket => {
     }, 300000);
     
     try {
-      await learnBot.start(config.channel, config.tokens, config.groqKey);
+      await learnBot.start(config.channel, config.tokens, config.groqKey, config.language, config.learnChunkSecs);
       socket.emit('learn:started', { ok: true });
-      io.emit('learn:log', 'Обучение началось на канале ' + config.channel + ' с ' + config.tokens.length + ' ботами');
+      io.emit('learn:log', 'Обучение началось на канале ' + config.channel + ' с ' + config.tokens.length + ' ботами (язык: ' + config.language + ', транскрипция: ' + config.learnChunkSecs + 'с)');
     } catch (e: any) {
       socket.emit('learn:error', { message: e.message });
     }

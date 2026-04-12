@@ -232,31 +232,82 @@ async function loadFromGitHubRepo(): Promise<any | null> {
   }
 }
 
+function mergeMarkovData(existing: any, newData: any): any {
+  if (!existing || !existing.chain) return newData;
+  if (!newData || !newData.chain) return existing;
+  
+  const merged = {
+    chain: { ...existing.chain },
+    starts: [...(existing.starts || [])],
+    transcriptChain: { ...(existing.transcriptChain || {}) },
+    transcriptStarts: [...(existing.transcriptStarts || [])],
+    messages: (existing.messages || 0) + (newData.messages || 0),
+    words: (existing.words || 0) + (newData.words || 0),
+  };
+  
+  for (const key of Object.keys(newData.chain)) {
+    if (!merged.chain[key]) {
+      merged.chain[key] = [];
+    }
+    for (const word of newData.chain[key]) {
+      if (word && !merged.chain[key].includes(word)) {
+        merged.chain[key].push(word);
+      }
+    }
+  }
+  
+  for (const key of Object.keys(newData.transcriptChain || {})) {
+    if (!merged.transcriptChain[key]) {
+      merged.transcriptChain[key] = [];
+    }
+    for (const word of newData.transcriptChain[key] || []) {
+      if (word && !merged.transcriptChain[key].includes(word)) {
+        merged.transcriptChain[key].push(word);
+      }
+    }
+  }
+  
+  for (const start of newData.starts || []) {
+    if (!merged.starts.includes(start)) {
+      merged.starts.push(start);
+    }
+  }
+  
+  for (const start of newData.transcriptStarts || []) {
+    if (!merged.transcriptStarts.includes(start)) {
+      merged.transcriptStarts.push(start);
+    }
+  }
+  
+  console.log('[github] Merged data:', merged.messages, 'messages,', Object.keys(merged.chain).length, 'unique chains');
+  return merged;
+}
+
 async function saveToGitHubRepo(data: any): Promise<boolean> {
   if (!GITHUB_TOKEN || !GITHUB_REPO) return false;
   
   const [owner, repo] = GITHUB_REPO.split('/');
   if (!owner || !repo) return false;
   
-  const json = JSON.stringify(data, null, 2);
-  console.log('[github] Saving to repo:', owner, repo, 'size:', json.length);
-  
   try {
-    // First try to get current file to get SHA
     let sha = '';
+    let existingData = null;
     try {
       const r = await axios.get(`https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`, {
         headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
       });
       sha = r.data.sha;
-      console.log('[github] Got SHA:', sha);
+      existingData = JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf-8'));
+      console.log('[github] Loaded existing data, messages:', existingData.messages);
     } catch (e: any) {
-      console.log('[github] Get file error:', e.message, e.response?.status);
+      console.log('[github] No existing file or error:', e.message);
     }
     
-    // Create or update file
+    const mergedData = mergeMarkovData(existingData, data);
+    const json = JSON.stringify(mergedData, null, 2);
+    console.log('[github] Saving to repo:', owner, repo, 'size:', json.length, 'messages:', mergedData.messages);
+    
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`;
-    console.log('[github] PUT to:', url);
     const payload: any = {
       message: 'Update Markov chain data',
       content: Buffer.from(json).toString('base64'),

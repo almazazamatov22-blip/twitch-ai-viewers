@@ -33,6 +33,7 @@ export class BotManager {
   private pointsService: ChannelPointsService | null = null;
   private learnBot: any = null;
   private currentGame = '';
+  private transcriptBots: Set<string> | null = null; // null = all bots
 
   constructor(
     configs: BotConfig[],
@@ -108,7 +109,7 @@ export class BotManager {
       console.log('[bot] Skipping transcription (random)');
       return;
     }
-    const allBots = Array.from(this.bots.values()).filter(b => b.connected);
+    const allBots = Array.from(this.bots.values()).filter(b => b.connected && (!this.transcriptBots || this.transcriptBots.has(b.username.toLowerCase())));
     if (!allBots.length) return;
 
     const maxCount = this.botsPerTranscript === 99 ? allBots.length : this.botsPerTranscript;
@@ -366,6 +367,14 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
   setPersona(username: string, cfg: PersonaConfig): void { this.ai.setPersona(username, cfg); }
   getPersonas(): Record<string, PersonaConfig> { return this.ai.getPersonas(); }
   setBotsPerTranscript(n: number): void { this.botsPerTranscript = n === 99 ? 99 : Math.max(1, n); }
+  setTranscriptBots(usernames: string[]): void {
+    if (!usernames || usernames.length === 0) {
+      this.transcriptBots = null; // all bots
+    } else {
+      this.transcriptBots = new Set(usernames.map(u => u.toLowerCase()));
+    }
+    console.log('[manager] transcriptBots:', this.transcriptBots ? [...this.transcriptBots] : 'all');
+  }
 
   async stop(): Promise<void> {
     console.log('[manager] stopping...');

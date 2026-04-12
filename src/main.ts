@@ -470,52 +470,64 @@ async function loadLearnData(): Promise<any> {
   return null;
 }
 
-// Track the highest message count we've ever seen — never save below this
-let bestMessageCount = 0;
-
 async function saveLearnData(): Promise<void> {
   if (!learnBot) return;
-  const data = learnBot.getData();
+  const localData = learnBot.getData();
 
-  // ── Safety guard: never overwrite with less data than we already have ──
-  // This protects against: failed GitHub loads, accidental restarts,
-  // Railway redeploys during active learning, or API errors on load.
-  if (data.messages < bestMessageCount) {
-    console.log('[learn] SKIP SAVE — current', data.messages, 'msgs < best known', bestMessageCount, 'msgs. Data loss protection.');
-    io.emit('learn:log', '⚠️ Сохранение пропущено — в памяти меньше данных чем сохранено (' + data.messages + ' < ' + bestMessageCount + ')');
-    return;
+  // ── ГЛАВНАЯ ЗАЩИТА ──────────────────────────────────────────────────────
+  // Перед сохранением всегда читаем актуальный файл с GitHub.
+  // Сохраняем ТОЛЬКО если наших данных больше чем на GitHub.
+  // Это защищает от любого сброса: рестарт Railway, сбой загрузки, etc.
+  // bestMessageCount не нужен — сравниваем напрямую с GitHub каждый раз.
+  if (GITHUB_TOKEN && GITHUB_REPO) {
+    let githubMsgs = 0;
+    try {
+      const remote = await loadFromGitHubRepo();
+      githubMsgs = remote?.messages || 0;
+    } catch { /* ignore fetch errors */ }
+
+    if (localData.messages < githubMsgs) {
+      const msg = `⚠️ ЗАЩИТА: в памяти ${localData.messages} сообщений < на GitHub ${githubMsgs}. Сохранение отменено — загружаю данные с GitHub.`;
+      console.log('[learn] ' + msg);
+      io.emit('learn:log', msg);
+      // Восстанавливаем данные с GitHub в память
+      try {
+        const remote = await loadFromGitHubRepo();
+        if (remote && learnBot) {
+          learnBot.loadData(remote);
+          io.emit('learn:log', '✅ Восстановлено ' + remote.messages + ' сообщений с GitHub');
+          io.emit('learn:status', learnBot.getStats());
+        }
+      } catch { /* ignore */ }
+      return;
+    }
   }
-  bestMessageCount = data.messages;
 
-  console.log('[learn] Saving', data.messages, 'messages (best so far:', bestMessageCount, ')');
+  console.log('[learn] Saving', localData.messages, 'messages to GitHub...');
 
   // Save locally as backup
   const p = getLearnDataPath();
   try {
-    fs.writeFileSync(p, JSON.stringify(data, null, 2));
-    console.log('[learn] Saved locally to', p);
+    fs.writeFileSync(p, JSON.stringify(localData, null, 2));
   } catch (e: any) {
     console.log('[learn] Local save error:', e.message);
   }
 
   // Save to GitHub Repo
   if (GITHUB_TOKEN && GITHUB_REPO) {
-    const ok = await saveToGitHubRepo(data);
+    const ok = await saveToGitHubRepo(localData);
     if (ok) {
-      io.emit('learn:log', '✅ Сохранено ' + data.messages + ' сообщений в GitHub');
+      io.emit('learn:log', '✅ Сохранено ' + localData.messages + ' сообщений в GitHub');
       return;
     }
-    console.log('[github] Repo save failed, trying Gist...');
   }
 
-  // Fallback to Gist (legacy)
+  // Fallback to Gist
   if (GITHUB_TOKEN && MARKOV_GIST_ID) {
-    const ok = await saveToGitHub(data);
-    if (ok) {
-      io.emit('learn:log', '✅ Сохранено в GitHub Gist (' + data.messages + ' сообщений)');
-    } else {
-      io.emit('learn:log', '❌ Ошибка сохранения в GitHub');
-    }
+    const ok = await saveToGitHub(localData);
+    io.emit('learn:log', ok
+      ? '✅ Сохранено в Gist (' + localData.messages + ' сообщений)'
+      : '❌ Ошибка сохранения');
   } else {
     io.emit('learn:log', '⚠️ GitHub не настроен');
   }
@@ -693,6 +705,13 @@ io.on('connection', socket => {
     if (manager) await manager.claimAllBonusChests();
     socket.emit('points:claimed_all', { ok: true });
   });
+  socket.on('set:transcript_bots', (data: { usernames: string[] }) => {
+    if (manager && Array.isArray(data.usernames)) {
+      manager.setTranscriptBots(data.usernames);
+      console.log('[server] transcript bots set:', data.usernames);
+    }
+  });
+
   socket.on('disconnect', () => console.log('[server] disconnected', socket.id));
 });
 
@@ -722,8 +741,7 @@ async function autoStart(): Promise<void> {
     const savedData = await loadLearnData();
     if (savedData) {
       learnBot.loadData(savedData);
-      bestMessageCount = Math.max(bestMessageCount, savedData.messages || 0);
-      console.log('[server] Loaded learn data:', savedData.messages, 'messages (bestMessageCount:', bestMessageCount, ')');
+      console.log('[server] Loaded learn data:', savedData.messages, 'messages');
     }
     io.emit('learn:config', { channel: learnConfig.channel });
     io.emit('learn:status', learnBot.getStats());
@@ -767,18 +785,29 @@ async function autoStart(): Promise<void> {
   io.emit('bots:started', { bots: startedBots });
   console.log('[server] started', startedBots.length, 'bots');
   
-// Send greetings from all bots with delay
-  console.log('[server] Scheduling greetings for', startedBots.length, 'bots...');
+// Send greetings ONLY when stream is live
+  const GREETINGS = [
+    'привет', 'ку', 'салам', 'дарова', 'даров', 'прив',
+    'q', 'qq', 'darova', 'privet', 'salam',
+    'привет как дела', 'ку что сегодня будет',
+    'ку какие планы на сегодня?', 'дарова баран',
+    'привет ричи', 'ку рич', 'даров рич',
+  ];
+  console.log('[server] Scheduling greetings for', startedBots.length, 'bots (only if live)...');
   for (let i = 0; i < startedBots.length; i++) {
     const botName = startedBots[i];
     const delay = 5000 + i * 30000;
-    setTimeout(() => {
-      if (manager && botName) {
-        const greetings = ['ку', 'привет', 'дарова', 'всем привет'];
-        const greeting = greetings[Math.floor(Math.random() * greetings.length)];
-        manager.sendManual([botName], greeting);
-        console.log('[server] Greeting:', botName, greeting);
+    setTimeout(async () => {
+      if (!manager || !botName) return;
+      // Re-check live status right before sending
+      const si = await getStreamData(cfg.channel);
+      if (!si.live) {
+        console.log('[server] Stream offline — skipping greeting for', botName);
+        return;
       }
+      const greeting = GREETINGS[Math.floor(Math.random() * GREETINGS.length)];
+      manager.sendManual([botName], greeting);
+      console.log('[server] Greeting (live):', botName, greeting);
     }, delay);
   }
 

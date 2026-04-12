@@ -290,27 +290,41 @@ export class LearnBot {
     });
   }
 
-  stop(): void {
+  // Stops only connections (chat + transcription).
+  // Chain data (chain, contextChain, messages) stays in memory.
+  // Call this instead of stop() when you want to switch channels or pause.
+  stopConnections(): void {
     this.running = false;
 
-    // Stop transcription
     if (this.transcriptionService) {
       this.transcriptionService.stop();
       this.transcriptionService = null;
     }
 
-    // Disconnect chat bots
     for (const bot of this.clients) {
       try { bot.client.disconnect(); } catch { /* ignore */ }
     }
     this.clients = [];
 
-    this.emit('learn:log', '🛑 Обучение остановлено');
+    this.emit('learn:log', '⏸ Подключения закрыты. Накоплено ' + this.messages + ' сообщений — данные в памяти.');
     this.emit('learn:status', {
       running: false,
       messages: this.messages,
       words: this.words,
     });
+  }
+
+  // Full stop — disconnects AND clears all data from memory.
+  // Only use this if you intentionally want to reset everything.
+  stop(): void {
+    this.stopConnections();
+    this.chain = {};
+    this.starts = [];
+    this.contextChain = {};
+    this.messages = 0;
+    this.words = 0;
+    this.recentTranscripts = [];
+    this.emit('learn:log', '🗑 Данные очищены из памяти.');
   }
 
   // ── Data API ───────────────────────────────────────────────────────────────

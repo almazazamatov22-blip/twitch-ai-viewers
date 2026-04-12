@@ -470,12 +470,25 @@ async function loadLearnData(): Promise<any> {
   return null;
 }
 
+// Track the highest message count we've ever seen — never save below this
+let bestMessageCount = 0;
+
 async function saveLearnData(): Promise<void> {
   if (!learnBot) return;
   const data = learnBot.getData();
-  
-  console.log('[learn] saveLearnData - GITHUB_TOKEN:', !!GITHUB_TOKEN, 'GITHUB_REPO:', GITHUB_REPO);
-  
+
+  // ── Safety guard: never overwrite with less data than we already have ──
+  // This protects against: failed GitHub loads, accidental restarts,
+  // Railway redeploys during active learning, or API errors on load.
+  if (data.messages < bestMessageCount) {
+    console.log('[learn] SKIP SAVE — current', data.messages, 'msgs < best known', bestMessageCount, 'msgs. Data loss protection.');
+    io.emit('learn:log', '⚠️ Сохранение пропущено — в памяти меньше данных чем сохранено (' + data.messages + ' < ' + bestMessageCount + ')');
+    return;
+  }
+  bestMessageCount = data.messages;
+
+  console.log('[learn] Saving', data.messages, 'messages (best so far:', bestMessageCount, ')');
+
   // Save locally as backup
   const p = getLearnDataPath();
   try {
@@ -484,28 +497,22 @@ async function saveLearnData(): Promise<void> {
   } catch (e: any) {
     console.log('[learn] Local save error:', e.message);
   }
-  
-  // Save to GitHub Repo (new way)
-  console.log('[github] Checking save - GITHUB_TOKEN:', !!GITHUB_TOKEN, 'GITHUB_REPO:', GITHUB_REPO);
+
+  // Save to GitHub Repo
   if (GITHUB_TOKEN && GITHUB_REPO) {
-    console.log('[github] Saving to Repo...');
     const ok = await saveToGitHubRepo(data);
-    console.log('[github] saveToGitHubRepo result:', ok);
     if (ok) {
-      io.emit('learn:log', '✅ Сохранено в GitHub Repo');
+      io.emit('learn:log', '✅ Сохранено ' + data.messages + ' сообщений в GitHub');
       return;
     }
     console.log('[github] Repo save failed, trying Gist...');
   }
-  
+
   // Fallback to Gist (legacy)
-  console.log('[github] saveToGitHub check - token:', !!GITHUB_TOKEN, 'gistId:', !!MARKOV_GIST_ID, 'data msgs:', data.messages);
   if (GITHUB_TOKEN && MARKOV_GIST_ID) {
-    console.log('[github] Calling saveToGitHub...');
     const ok = await saveToGitHub(data);
-    console.log('[github] saveToGitHub result:', ok);
     if (ok) {
-      io.emit('learn:log', '✅ Сохранено в GitHub Gist');
+      io.emit('learn:log', '✅ Сохранено в GitHub Gist (' + data.messages + ' сообщений)');
     } else {
       io.emit('learn:log', '❌ Ошибка сохранения в GitHub');
     }
@@ -598,40 +605,50 @@ io.on('connection', socket => {
       socket.emit('learn:error', { message: 'Настройте LEARN_CHANNEL и добавьте ботов BOT1_OAUTH итд' });
       return;
     }
-    
-    if (learnBot) learnBot.stop();
-    learnBot = new LearnBot((e, d) => io.emit(e, d));
-    
-    // Load saved data if exists
-    const savedData = await loadLearnData();
-    if (savedData) {
-      learnBot.loadData(savedData);
-      io.emit('learn:log', 'Загружено ' + savedData.messages + ' сохранённых сообщений');
+
+    // ── KEY FIX: never throw away in-memory data ──────────────────────────
+    // Stop only the connections (chat + transcription), keep the chain data.
+    // If learnBot already exists with data, reuse it — don't create a new one.
+    // Only create a new LearnBot if one doesn't exist yet (first ever start).
+    if (learnBot) {
+      learnBot.stopConnections(); // stops chat/transcription but keeps chain
+    } else {
+      learnBot = new LearnBot((e, d) => io.emit(e, d));
+      // Fresh instance — load from GitHub
+      const savedData = await loadLearnData();
+      if (savedData) {
+        learnBot.loadData(savedData);
+        bestMessageCount = Math.max(bestMessageCount, savedData.messages || 0);
+        io.emit('learn:log', '✅ Загружено ' + savedData.messages + ' сообщений');
+      } else {
+        io.emit('learn:log', '⚠️ Сохранённых данных нет — начинаем с нуля');
+      }
     }
-    
-    // Auto-save every 5 minutes
+
+    // Auto-save every 15 minutes
     if (learnSaveInterval) clearInterval(learnSaveInterval);
     learnSaveInterval = setInterval(() => {
       saveLearnData();
-    }, 300000);
-    
+    }, 900000);
+
     try {
       await learnBot.start(config.channel, config.tokens, config.groqKey, config.language, config.learnChunkSecs);
       socket.emit('learn:started', { ok: true });
-      io.emit('learn:log', 'Обучение началось на канале ' + config.channel + ' с ' + config.tokens.length + ' ботами (язык: ' + config.language + ', транскрипция: ' + config.learnChunkSecs + 'с)');
+      const stats = learnBot.getStats();
+      io.emit('learn:log', '▶ Обучение на канале ' + config.channel + ' | уже накоплено: ' + stats.messages + ' сообщений');
     } catch (e: any) {
       socket.emit('learn:error', { message: e.message });
     }
   });
-  
+
   socket.on('learn:stop', () => {
-    if (learnBot) { 
-      saveLearnData();
-      learnBot.stop(); 
-      learnBot = null; 
+    if (learnBot) {
+      saveLearnData();          // сохранить на GitHub
+      learnBot.stopConnections(); // отключить чат/транскрипцию, НЕ удалять данные
+      // learnBot остаётся в памяти с накопленными данными!
     }
     if (learnSaveInterval) { clearInterval(learnSaveInterval); learnSaveInterval = null; }
-    io.emit('learn:log', 'Обучение остановлено, данные сохранены');
+    io.emit('learn:log', '⏸ Обучение остановлено. Данные сохранены и остаются в памяти.');
   });
 
   socket.on('learn:getData', () => {
@@ -705,7 +722,8 @@ async function autoStart(): Promise<void> {
     const savedData = await loadLearnData();
     if (savedData) {
       learnBot.loadData(savedData);
-      console.log('[server] Loaded learn data:', savedData.messages, 'messages');
+      bestMessageCount = Math.max(bestMessageCount, savedData.messages || 0);
+      console.log('[server] Loaded learn data:', savedData.messages, 'messages (bestMessageCount:', bestMessageCount, ')');
     }
     io.emit('learn:config', { channel: learnConfig.channel });
     io.emit('learn:status', learnBot.getStats());

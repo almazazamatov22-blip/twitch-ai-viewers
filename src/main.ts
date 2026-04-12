@@ -166,6 +166,7 @@ function readEnvConfig() {
 
 function readLearnConfig() {
   const learnChan = extractChannel(process.env.LEARN_CHANNEL || '');
+  const groqKey = process.env.GROQ_API_KEY?.trim();
   const bots: { username: string; token: string }[] = [];
   for (let i = 1; i <= 50; i++) {
     const u = process.env['BOT' + i + '_USERNAME']?.trim();
@@ -175,6 +176,7 @@ function readLearnConfig() {
   return {
     channel: learnChan,
     tokens: bots.map(b => b.token),
+    groqKey,
   };
 }
 
@@ -595,7 +597,7 @@ io.on('connection', socket => {
     }, 300000);
     
     try {
-      await learnBot.start(config.channel, config.tokens);
+      await learnBot.start(config.channel, config.tokens, config.groqKey);
       socket.emit('learn:started', { ok: true });
       io.emit('learn:log', 'Обучение началось на канале ' + config.channel + ' с ' + config.tokens.length + ' ботами');
     } catch (e: any) {

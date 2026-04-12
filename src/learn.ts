@@ -1,6 +1,8 @@
 import * as tmi from 'tmi.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as Groq from 'groq-sdk';
+import { spawn } from 'child_process';
 
 interface MarkovChain {
   [key: string]: string[];
@@ -15,20 +17,73 @@ export class LearnBot {
   private clients: BotClient[] = [];
   private chain: MarkovChain = {};
   private starts: string[] = [];
+  private transcriptChain: MarkovChain = {}; // transcription -> responses
+  private transcriptStarts: string[] = [];
   private keyLength = 2;
   private messages = 0;
   private words = 0;
   private running = false;
   private emit: (event: string, data: any) => void;
+  private groqKey: string = '';
+  private channel: string = '';
+  private transcriber: any = null;
 
   constructor(emit: (event: string, data: any) => void) {
     this.emit = emit;
   }
 
-  async start(channel: string, tokens: string[]): Promise<void> {
+  // New method: learn from transcript + chat response together
+  learnWithContext(transcript: string, response: string): void {
+    if (!transcript || transcript.length < 10 || !response || response.length < 2) return;
+    const tWords = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    const rWords = response.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+    if (tWords.length < 2 || rWords.length < 1) return;
+    // Key = first few words of transcript
+    const tKey = tWords.slice(0, Math.min(3, tWords.length)).join(' ');
+    if (!this.transcriptChain[tKey]) this.transcriptChain[tKey] = [];
+    this.transcriptChain[tKey].push(rWords.slice(0, 4).join(' '));
+    // Also learn the response normally
+    this.learn(response);
+  }
+
+  // Generate from transcript context
+  generateFromTranscript(transcript: string): string {
+    if (Object.keys(this.transcriptChain).length === 0) return '';
+    const words = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    let matchingKey = '';
+    // Find longest matching key
+    for (let i = words.length - 1; i >= 0; i--) {
+      const key = words.slice(Math.max(0, i - 1), i + 1).join(' ');
+      if (this.transcriptChain[key] && this.transcriptChain[key].length > 0) {
+        matchingKey = key;
+        break;
+      }
+    }
+    if (!matchingKey) return '';
+    const result: string[] = matchingKey.split(' ');
+    let current = matchingKey;
+    for (let i = 0; i < 10; i++) {
+      const options = this.transcriptChain[current];
+      if (!options || options.length === 0) break;
+      const next = options[Math.floor(Math.random() * options.length)];
+      result.push(next);
+      current = result.slice(-this.keyLength).join(' ');
+    }
+    return result.join(' ');
+  }
+
+  async start(channel: string, tokens: string[], groqKey?: string): Promise<void> {
     if (this.running) return;
     
-    const chan = channel.toLowerCase().replace(/^#/, '');
+    this.channel = channel.toLowerCase().replace(/^#/, '');
+    this.groqKey = groqKey || '';
+    
+    // Start transcription if we have groqKey
+    if (this.groqKey) {
+      this.startTranscription();
+    }
+    
+    const chan = this.channel;
     this.emit('learn:log', `Запуск ${tokens.length} ботов на канале ${chan}`);
     
     for (let i = 0; i < tokens.length; i++) {
@@ -85,7 +140,78 @@ export class LearnBot {
     });
   }
 
+  // Start transcription to learn from stream audio
+  private async startTranscription(): Promise<void> {
+    if (!this.groqKey || !this.channel) return;
+    
+    const GroqSDK = require('groq-sdk');
+    const groq = new GroqSDK({ apiKey: this.groqKey });
+    const tmpDir = '/tmp';
+    let stopped = false;
+    
+    const capture = async () => {
+      if (stopped || this.running === false) return;
+      
+      const outFile = tmpDir + '/learn-audio-' + Date.now() + '.wav';
+      try {
+        const link = spawn('streamlink', [
+          '--quiet', '--twitch-low-latency',
+          'https://twitch.tv/' + this.channel,
+          'audio_only,worst',
+          '--stdout',
+        ], { timeout: 65000 });
+        
+        const ffmpeg = spawn('ffmpeg', [
+          '-i', 'pipe:0',
+          '-t', '50',
+          '-vn', '-ar', '16000',
+          '-ac', '1',
+          '-c:a', 'pcm_s16le',
+          outFile
+        ]);
+        
+        link.stdout.pipe(ffmpeg.stdin);
+        
+        let done = false;
+        ffmpeg.on('close', async () => {
+          if (done) return;
+          done = true;
+          if (stopped) return;
+          
+          try {
+            const stat = fs.statSync(outFile);
+            if (stat.size > 5000) {
+              const audio = fs.readFileSync(outFile);
+              const text = await groq.audio.transcriptions.create({
+                file: new File([audio], 'audio.wav', { type: 'audio/wav' }),
+                language: 'ru'
+              });
+              
+              const transcript = (text as any)?.text?.trim();
+              if (transcript && transcript.length > 10) {
+                console.log('[learn] Transcript heard:', transcript.slice(0, 80));
+                this.emit('learn:transcript', transcript);
+              }
+            }
+          } catch (e: any) {
+            // silent fail - stream might be offline
+          }
+          try { fs.unlinkSync(outFile); } catch {}
+          setTimeout(capture, 3000);
+        });
+      } catch (e: any) {
+        setTimeout(capture, 10000);
+      }
+    };
+    
+    capture();
+    this.emit('learn:log', 'Транскрипция включена');
+  }
+
   stop(): void {
+    // Stop transcription
+    this.running = false;
+    
     for (const bot of this.clients) {
       try {
         bot.client.disconnect();

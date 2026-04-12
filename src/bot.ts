@@ -130,10 +130,17 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
           
           // 100% Markov Chain generation with AI verification
           if (this.learnBot && this.learnBot.hasEnoughData && this.learnBot.hasEnoughData(100)) {
-            // Generate from Markov
-            const markovGen = this.learnBot.generateWithContext ? 
-              this.learnBot.generateWithContext(text, 5) : 
-              this.learnBot.generate();
+            // First try to generate from transcript context (learned from stream audio)
+            let markovGen = '';
+            if (this.learnBot.generateFromTranscript) {
+              markovGen = this.learnBot.generateFromTranscript(text) || '';
+            }
+            // Fallback to regular markov if no transcript context
+            if (!markovGen || markovGen.length < 5) {
+              markovGen = this.learnBot.generateWithContext ? 
+                this.learnBot.generateWithContext(text, 5) : 
+                this.learnBot.generate();
+            }
             
             if (markovGen && markovGen.length > 5) {
               // Use AI to verify and fix the Markov output

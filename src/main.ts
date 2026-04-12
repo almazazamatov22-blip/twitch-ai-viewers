@@ -470,63 +470,103 @@ async function loadLearnData(): Promise<any> {
   return null;
 }
 
+// ── Merge two Markov datasets — ALWAYS accumulates, never loses data ────
+function mergeLearnData(local: any, remote: any): any {
+  if (!remote) return local;
+  if (!local)  return remote;
+
+  // Merge chain: combine all values per key, filter nulls
+  const chain: Record<string, string[]> = { ...remote.chain };
+  for (const [key, vals] of Object.entries(local.chain || {}) as [string, any[]][]) {
+    const clean = vals.filter((v: any) => v != null);
+    if (chain[key]) {
+      chain[key] = [...chain[key].filter((v: any) => v != null), ...clean];
+    } else {
+      chain[key] = clean;
+    }
+  }
+
+  // Merge contextChain
+  const ctx: Record<string, string[]> = { ...(remote.contextChain || remote.transcriptChain || {}) };
+  const localCtx = local.contextChain || local.transcriptChain || {};
+  for (const [key, vals] of Object.entries(localCtx) as [string, any[]][]) {
+    const clean = vals.filter((v: any) => v != null);
+    if (ctx[key]) {
+      ctx[key] = [...ctx[key].filter((v: any) => v != null), ...clean];
+    } else {
+      ctx[key] = clean;
+    }
+  }
+
+  // Merge starts — limit duplicates to avoid bloat
+  const startCount: Record<string, number> = {};
+  for (const s of [...(remote.starts || []), ...(local.starts || [])]) {
+    if (s != null) startCount[s] = (startCount[s] || 0) + 1;
+  }
+  const starts: string[] = [];
+  for (const [s, cnt] of Object.entries(startCount)) {
+    starts.push(...Array(Math.min(cnt, 3)).fill(s));
+  }
+
+  const merged = {
+    chain,
+    starts,
+    contextChain: ctx,
+    messages: (remote.messages || 0) + Math.max(0, (local.messages || 0) - (remote.messages || 0)),
+    words: Math.max(remote.words || 0, local.words || 0),
+    uniqueWords: Object.keys(chain).length,
+    contextLinks: Object.keys(ctx).length,
+  };
+
+  console.log(`[merge] remote ${remote.messages} + local ${local.messages} → merged ${merged.messages} msgs, ${merged.uniqueWords} chain keys`);
+  return merged;
+}
+
 async function saveLearnData(): Promise<void> {
   if (!learnBot) return;
   const localData = learnBot.getData();
 
-  // ── ГЛАВНАЯ ЗАЩИТА ──────────────────────────────────────────────────────
-  // Перед сохранением всегда читаем актуальный файл с GitHub.
-  // Сохраняем ТОЛЬКО если наших данных больше чем на GitHub.
-  // Это защищает от любого сброса: рестарт Railway, сбой загрузки, etc.
-  // bestMessageCount не нужен — сравниваем напрямую с GitHub каждый раз.
+  // ── THE REAL FIX: always MERGE local + GitHub before saving ─────────────
+  // This means data can ONLY grow. Even if memory has 10 msgs and GitHub has
+  // 35000 — the merged result will have 35010 and that gets saved.
+  let dataToSave = localData;
+
   if (GITHUB_TOKEN && GITHUB_REPO) {
-    let githubMsgs = 0;
     try {
       const remote = await loadFromGitHubRepo();
-      githubMsgs = remote?.messages || 0;
-    } catch { /* ignore fetch errors */ }
-
-    if (localData.messages < githubMsgs) {
-      const msg = `⚠️ ЗАЩИТА: в памяти ${localData.messages} сообщений < на GitHub ${githubMsgs}. Сохранение отменено — загружаю данные с GitHub.`;
-      console.log('[learn] ' + msg);
-      io.emit('learn:log', msg);
-      // Восстанавливаем данные с GitHub в память
-      try {
-        const remote = await loadFromGitHubRepo();
-        if (remote && learnBot) {
-          learnBot.loadData(remote);
-          io.emit('learn:log', '✅ Восстановлено ' + remote.messages + ' сообщений с GitHub');
+      if (remote && (remote.messages || 0) > 0) {
+        dataToSave = mergeLearnData(localData, remote);
+        // Update learnBot memory with merged data so it keeps learning from full dataset
+        if (learnBot) {
+          learnBot.loadData(dataToSave);
           io.emit('learn:status', learnBot.getStats());
         }
-      } catch { /* ignore */ }
-      return;
+      }
+    } catch (e: any) {
+      console.log('[learn] Could not fetch GitHub for merge, saving local only:', e.message);
     }
   }
 
-  console.log('[learn] Saving', localData.messages, 'messages to GitHub...');
+  console.log('[learn] Saving merged data:', dataToSave.messages, 'messages to GitHub...');
 
   // Save locally as backup
   const p = getLearnDataPath();
-  try {
-    fs.writeFileSync(p, JSON.stringify(localData, null, 2));
-  } catch (e: any) {
-    console.log('[learn] Local save error:', e.message);
-  }
+  try { fs.writeFileSync(p, JSON.stringify(dataToSave, null, 2)); } catch { /* ignore */ }
 
   // Save to GitHub Repo
   if (GITHUB_TOKEN && GITHUB_REPO) {
-    const ok = await saveToGitHubRepo(localData);
+    const ok = await saveToGitHubRepo(dataToSave);
     if (ok) {
-      io.emit('learn:log', '✅ Сохранено ' + localData.messages + ' сообщений в GitHub');
+      io.emit('learn:log', '✅ Сохранено ' + dataToSave.messages + ' сообщений в GitHub');
       return;
     }
   }
 
   // Fallback to Gist
   if (GITHUB_TOKEN && MARKOV_GIST_ID) {
-    const ok = await saveToGitHub(localData);
+    const ok = await saveToGitHub(dataToSave);
     io.emit('learn:log', ok
-      ? '✅ Сохранено в Gist (' + localData.messages + ' сообщений)'
+      ? '✅ Сохранено в Gist (' + dataToSave.messages + ' сообщений)'
       : '❌ Ошибка сохранения');
   } else {
     io.emit('learn:log', '⚠️ GitHub не настроен');

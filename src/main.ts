@@ -239,8 +239,7 @@ function mergeMarkovData(existing: any, newData: any): any {
   const merged = {
     chain: { ...existing.chain },
     starts: [...(existing.starts || [])],
-    transcriptChain: { ...(existing.transcriptChain || {}) },
-    transcriptStarts: [...(existing.transcriptStarts || [])],
+    contextChain: { ...(existing.contextChain || existing.transcriptChain || {}) },
     messages: (existing.messages || 0) + (newData.messages || 0),
     words: (existing.words || 0) + (newData.words || 0),
   };
@@ -256,13 +255,13 @@ function mergeMarkovData(existing: any, newData: any): any {
     }
   }
   
-  for (const key of Object.keys(newData.transcriptChain || {})) {
-    if (!merged.transcriptChain[key]) {
-      merged.transcriptChain[key] = [];
+  for (const key of Object.keys(newData.contextChain || {})) {
+    if (!merged.contextChain[key]) {
+      merged.contextChain[key] = [];
     }
-    for (const word of newData.transcriptChain[key] || []) {
-      if (word && !merged.transcriptChain[key].includes(word)) {
-        merged.transcriptChain[key].push(word);
+    for (const word of (newData.contextChain || {})[key] || []) {
+      if (word && !merged.contextChain[key].includes(word)) {
+        merged.contextChain[key].push(word);
       }
     }
   }
@@ -270,12 +269,6 @@ function mergeMarkovData(existing: any, newData: any): any {
   for (const start of newData.starts || []) {
     if (!merged.starts.includes(start)) {
       merged.starts.push(start);
-    }
-  }
-  
-  for (const start of newData.transcriptStarts || []) {
-    if (!merged.transcriptStarts.includes(start)) {
-      merged.transcriptStarts.push(start);
     }
   }
   

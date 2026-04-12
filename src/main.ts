@@ -200,34 +200,39 @@ console.log('[env] GITHUB_FILE_PATH:', GITHUB_FILE_PATH);
 
 async function loadFromGitHubRepo(): Promise<any | null> {
   if (!GITHUB_TOKEN || !GITHUB_REPO) {
-    console.log('[github] No GITHUB_REPO configured');
+    console.log('[github] loadFromGitHubRepo: No GITHUB_REPO configured');
     return null;
   }
   
   const [owner, repo] = GITHUB_REPO.split('/');
   if (!owner || !repo) {
-    console.log('[github] Invalid GITHUB_REPO format');
+    console.log('[github] loadFromGitHubRepo: Invalid GITHUB_REPO format');
     return null;
   }
   
   try {
+    console.log('[github] loadFromGitHubRepo: Fetching from', owner, repo, GITHUB_FILE_PATH);
     // Try to get file (returns 404 if doesn't exist)
     const r = await axios.get(`https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`, {
       headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
     });
     
+    console.log('[github] loadFromGitHubRepo: response status:', r.status, 'has content:', !!r.data.content);
+    
     if (r.data.content) {
       const content = Buffer.from(r.data.content, 'base64').toString('utf-8');
-      console.log('[github] Loaded Markov data from repo');
-      return JSON.parse(content);
+      const parsed = JSON.parse(content);
+      console.log('[github] loadFromGitHubRepo: SUCCESS, messages:', parsed.messages);
+      return parsed;
     }
+    console.log('[github] loadFromGitHubRepo: NO CONTENT in response');
     return null;
   } catch (e: any) {
+    console.log('[github] loadFromGitHubRepo ERROR:', e.message, 'status:', e.response?.status);
     if (e.response?.status === 404) {
       console.log('[github] File not found, will create on first save');
       return null;
     }
-    console.log('[github] Could not load:', e.message);
     return null;
   }
 }
@@ -282,23 +287,27 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
   const [owner, repo] = GITHUB_REPO.split('/');
   if (!owner || !repo) return false;
   
+  console.log('[github] saveToGitHubRepo: Starting save with', data.messages, 'messages');
+  
   try {
     let sha = '';
     let existingData = null;
     try {
+      console.log('[github] saveToGitHubRepo: Fetching existing file...');
       const r = await axios.get(`https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`, {
         headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
       });
       sha = r.data.sha;
       existingData = JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf-8'));
-      console.log('[github] Loaded existing data, messages:', existingData.messages);
+      console.log('[github] saveToGitHubRepo: Existing file has', existingData.messages, 'messages');
     } catch (e: any) {
-      console.log('[github] No existing file or error:', e.message);
+      console.log('[github] saveToGitHubRepo: File does not exist or error:', e.message);
     }
     
+    // CRITICAL: Always merge with existing data!
     const mergedData = mergeMarkovData(existingData, data);
     const json = JSON.stringify(mergedData, null, 2);
-    console.log('[github] Saving to repo:', owner, repo, 'size:', json.length, 'messages:', mergedData.messages);
+    console.log('[github] saveToGitHubRepo: FINAL merged data has', mergedData.messages, 'messages');
     
     const url = `https://api.github.com/repos/${owner}/${repo}/contents/${GITHUB_FILE_PATH}`;
     const payload: any = {
@@ -307,13 +316,14 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
     };
     if (sha) payload.sha = sha;
     
+    console.log('[github] saveToGitHubRepo: Uploading to GitHub...');
     const res = await axios.put(url, payload, {
       headers: { Authorization: 'Bearer ' + GITHUB_TOKEN, 'Content-Type': 'application/json' },
     });
-    console.log('[github] Saved to repo, status:', res.status);
+    console.log('[github] saveToGitHubRepo: SUCCESS, status:', res.status);
     return true;
   } catch (e: any) {
-    console.log('[github] Save to repo error:', e.message, e.response?.status, e.response?.data);
+    console.log('[github] saveToGitHubRepo ERROR:', e.message, e.response?.status, e.response?.data);
     return false;
   }
 }
@@ -569,35 +579,41 @@ function mergeLearnData(local: any, remote: any): any {
 async function saveLearnData(): Promise<void> {
   if (!learnBot) return;
   const localData = learnBot.getData();
+  console.log('[learn] SAVE START: local has', localData.messages, 'messages');
 
-  // ── THE REAL FIX: always MERGE local + GitHub before saving ─────────────
-  // This means data can ONLY grow. Even if memory has 10 msgs and GitHub has
-  // 35000 — the merged result will have 35010 and that gets saved.
+  // Always fetch GitHub FIRST, then merge
   let dataToSave = localData;
+  let remoteData: any = null;
 
   if (GITHUB_TOKEN && GITHUB_REPO) {
     try {
-      const remote = await loadFromGitHubRepo();
-      if (remote && (remote.messages || 0) > 0) {
-        dataToSave = mergeLearnData(localData, remote);
+      remoteData = await loadFromGitHubRepo();
+      console.log('[learn] GitHub remote loaded:', remoteData?.messages || 0, 'messages');
+      
+      if (remoteData && (remoteData.messages || 0) > 0) {
+        dataToSave = mergeLearnData(localData, remoteData);
+        console.log('[learn] Merged result:', dataToSave.messages, 'messages');
+        
         // Update learnBot memory with merged data so it keeps learning from full dataset
         if (learnBot) {
           learnBot.loadData(dataToSave);
           io.emit('learn:status', learnBot.getStats());
         }
+      } else {
+        console.log('[learn] WARNING: GitHub returned null or 0 messages, saving local ONLY!');
       }
     } catch (e: any) {
-      console.log('[learn] Could not fetch GitHub for merge, saving local only:', e.message);
+      console.log('[learn] ERROR fetching GitHub:', e.message);
     }
   }
 
-  console.log('[learn] Saving merged data:', dataToSave.messages, 'messages to GitHub...');
+  console.log('[learn] FINAL: Saving', dataToSave.messages, 'messages to GitHub...');
 
   // Save locally as backup
   const p = getLearnDataPath();
   try { fs.writeFileSync(p, JSON.stringify(dataToSave, null, 2)); } catch { /* ignore */ }
 
-  // Save to GitHub Repo
+  // Save to GitHub Repo (it will also try to merge internally)
   if (GITHUB_TOKEN && GITHUB_REPO) {
     const ok = await saveToGitHubRepo(dataToSave);
     if (ok) {
@@ -706,8 +722,26 @@ io.on('connection', socket => {
     // Stop only the connections (chat + transcription), keep the chain data.
     // If learnBot already exists with data, reuse it — don't create a new one.
     // Only create a new LearnBot if one doesn't exist yet (first ever start).
+    // ALSO: If GitHub has more data than memory, load it!
     if (learnBot) {
       learnBot.stopConnections(); // stops chat/transcription but keeps chain
+      
+      // CRITICAL FIX: Check if GitHub has more data than memory
+      const config = readLearnConfig();
+      if (GITHUB_TOKEN && GITHUB_REPO && config.channel) {
+        try {
+          const remote = await loadFromGitHubRepo();
+          const memMsgs = learnBot.getData().messages || 0;
+          const remoteMsgs = remote?.messages || 0;
+          if (remote && remoteMsgs > memMsgs) {
+            console.log('[learn] GitHub has more data (' + remoteMsgs + ') than memory (' + memMsgs + '), reloading...');
+            learnBot.loadData(remote);
+            io.emit('learn:log', '🔄 Обновлено из GitHub: ' + remoteMsgs + ' сообщений');
+          }
+        } catch (e: any) {
+          console.log('[learn] Could not check GitHub:', e.message);
+        }
+      }
     } else {
       learnBot = new LearnBot((e, d) => io.emit(e, d));
       // Fresh instance — load from GitHub

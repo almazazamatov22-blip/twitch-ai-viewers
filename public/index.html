@@ -112,10 +112,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
 /* Bots per transcript */
 .bpt-row{display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--b1);margin-bottom:5px}
 .bpt-label{font-size:11px;color:var(--tx3);white-space:nowrap}
-.bpt-btns{display:flex;gap:3px}
-.bpt-btn{width:24px;height:24px;border-radius:5px;border:1px solid var(--b2);background:transparent;color:var(--tx2);cursor:pointer;font-size:12px;font-weight:600;font-family:inherit;transition:all .15s;display:flex;align-items:center;justify-content:center}
-.bpt-btn.on{background:var(--pu);border-color:var(--pu);color:#fff}
-.bpt-btn:hover:not(.on){border-color:var(--pu);color:var(--pl)}
+.bpt-input{width:52px;height:26px;background:var(--ca);border:1px solid var(--b2);border-radius:5px;color:var(--tx);font-family:inherit;font-size:12px;font-weight:600;text-align:center;outline:none;transition:border-color .15s}
+.bpt-input:focus{border-color:var(--pu)}
+.bpt-hint{font-size:10px;color:var(--tx3)}
 /* Presence legend */
 .presence-info{background:rgba(34,197,94,.06);border:1px solid rgba(34,197,94,.15);border-radius:7px;padding:4px 8px;margin-bottom:5px;font-size:10px;color:var(--tx3);line-height:1.4}
 .presence-info b{color:var(--gr)}
@@ -304,7 +303,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
       <!-- Bots per transcription -->
       <div class="bpt-row">
         <span class="bpt-label">Отвечают на транскрипцию:</span>
-        <div class="bpt-btns" id="bpt-btns"></div>
+        <input class="bpt-input" id="bpt-input" type="number" min="1" max="99" value="2"
+          onchange="setBPT(Math.max(1,parseInt(this.value)||1))"
+          onkeydown="if(event.key==='Enter')this.blur()">
+        <span class="bpt-hint" id="bpt-hint">из 0</span>
       </div>
       <!-- Presence info -->
       <div class="presence-info">
@@ -635,21 +637,13 @@ socket.on('stream:viewers', d=>document.getElementById('vcnt').textContent=d.vie
 
 // ── BOTS PER TRANSCRIPT ──
 function renderBPT(){
-  const btns=document.getElementById('bpt-btns'); if(!btns)return;
-  btns.innerHTML='';
-  const max=Math.max(4,totalBots)||4;
-  for(let i=1;i<=max;i++){
-    const b=document.createElement('button'); b.className='bpt-btn'+(i===botsPerTranscript?' on':'');
-    b.textContent=String(i); b.onclick=()=>setBPT(i);
-    btns.appendChild(b);
-  }
-  if(totalBots>4){
-    const b=document.createElement('button'); b.className='bpt-btn'+(totalBots===botsPerTranscript?' on':'');
-    b.textContent='Все'; b.onclick=()=>setBPT(totalBots);
-    btns.appendChild(b);
-  }
+  const inp=document.getElementById('bpt-input');
+  const hint=document.getElementById('bpt-hint');
+  if(inp) inp.value=botsPerTranscript;
+  if(hint) hint.textContent='из '+(totalBots||0);
 }
 function setBPT(n){
+  n=Math.max(1,Math.min(n,totalBots||99));
   botsPerTranscript=n; socket.emit('set:bots_per_transcript',{n});
   renderBPT(); toast('info','⚙ '+n+' ботов отвечают на каждую транскрипцию');
 }

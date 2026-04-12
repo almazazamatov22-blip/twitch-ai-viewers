@@ -217,16 +217,27 @@ async function loadFromGitHubRepo(): Promise<any | null> {
       headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
     });
     
-    console.log('[github] loadFromGitHubRepo: response status:', r.status, 'has content:', !!r.data.content);
+    console.log('[github] loadFromGitHubRepo: response status:', r.status, 'has content:', !!r.data.content, 'has download_url:', !!r.data.download_url);
     
+    let content: string;
     if (r.data.content) {
-      const content = Buffer.from(r.data.content, 'base64').toString('utf-8');
-      const parsed = JSON.parse(content);
-      console.log('[github] loadFromGitHubRepo: SUCCESS, messages:', parsed.messages);
-      return parsed;
+      // Small file: content is in response
+      content = Buffer.from(r.data.content, 'base64').toString('utf-8');
+    } else if (r.data.download_url) {
+      // Large file: need to fetch via download_url
+      console.log('[github] loadFromGitHubRepo: Fetching large file via download_url...');
+      const downloadR = await axios.get(r.data.download_url, {
+        headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
+      });
+      content = downloadR.data;
+    } else {
+      console.log('[github] loadFromGitHubRepo: NO CONTENT and NO download_url');
+      return null;
     }
-    console.log('[github] loadFromGitHubRepo: NO CONTENT in response');
-    return null;
+    
+    const parsed = JSON.parse(content);
+    console.log('[github] loadFromGitHubRepo: SUCCESS, messages:', parsed.messages);
+    return parsed;
   } catch (e: any) {
     console.log('[github] loadFromGitHubRepo ERROR:', e.message, 'status:', e.response?.status);
     if (e.response?.status === 404) {
@@ -298,7 +309,22 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
         headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
       });
       sha = r.data.sha;
-      existingData = JSON.parse(Buffer.from(r.data.content, 'base64').toString('utf-8'));
+      
+      // Handle large files (3MB+)
+      let content: string;
+      if (r.data.content) {
+        content = Buffer.from(r.data.content, 'base64').toString('utf-8');
+      } else if (r.data.download_url) {
+        console.log('[github] saveToGitHubRepo: Fetching large file via download_url...');
+        const downloadR = await axios.get(r.data.download_url, {
+          headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
+        });
+        content = downloadR.data;
+      } else {
+        content = '{}';
+      }
+      
+      existingData = JSON.parse(content);
       console.log('[github] saveToGitHubRepo: Existing file has', existingData.messages, 'messages');
     } catch (e: any) {
       console.log('[github] saveToGitHubRepo: File does not exist or error:', e.message);

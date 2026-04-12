@@ -361,6 +361,8 @@ export class LearnBot {
     return {
       chain: this.chain,
       starts: this.starts,
+      transcriptChain: this.transcriptChain,
+      transcriptStarts: this.transcriptStarts,
       messages: this.messages,
       words: this.words,
       uniqueWords: Object.keys(this.chain).length,
@@ -396,11 +398,13 @@ export class LearnBot {
     };
   }
 
-  loadData(data: { chain: MarkovChain; starts: string[]; messages: number; words: number }): void {
+  loadData(data: { chain: MarkovChain; starts: string[]; messages: number; words: number; transcriptChain?: MarkovChain; transcriptStarts?: string[] }): void {
     this.chain = data.chain || {};
     this.starts = data.starts || [];
+    this.transcriptChain = data.transcriptChain || {};
+    this.transcriptStarts = data.transcriptStarts || [];
     this.messages = data.messages || 0;
     this.words = data.words || 0;
-    console.log('[learn] Loaded data:', this.messages, 'messages,', Object.keys(this.chain).length, 'unique chains');
+    console.log('[learn] Loaded data:', this.messages, 'messages,', Object.keys(this.chain).length, 'chains,', Object.keys(this.transcriptChain).length, 'transcript chains');
   }
 }

@@ -569,8 +569,18 @@ io.on('connection', socket => {
   
   socket.on('get:learn:config', () => {
     const config = readLearnConfig();
-    socket.emit('learn:config', { channel: config.channel });
-    io.emit('learn:status', learnBot ? learnBot.getStats() : { running: false, messages: 0, words: 0, uniqueWords: 0 });
+    socket.emit('learn:config', { channel: config.channel, tokens: config.tokens.length });
+  });
+  
+  socket.on('learn:setChannel', (data: { channel: string }) => {
+    const chan = extractChannel(data.channel || '');
+    if (!chan) {
+      socket.emit('learn:error', { message: 'Укажите канал' });
+      return;
+    }
+    process.env.LEARN_CHANNEL = chan;
+    socket.emit('learn:config', { channel: chan });
+    socket.emit('learn:log', 'Канал изменён на ' + chan + ' (перезапустите для применения)');
   });
   
   socket.on('learn:start', async () => {

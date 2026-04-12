@@ -371,6 +371,10 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
       </div>
       <div style="background:var(--ca);border:1px solid var(--b2);border-radius:10px;padding:14px">
         <div style="font-size:11px;color:var(--tx3);margin-bottom:6px">Канал для обучения</div>
+        <div style="display:flex;gap:8px;margin-bottom:6px">
+          <input type="text" id="learn-channel-input" placeholder="channel" style="flex:1;padding:6px 10px;border-radius:6px;border:1px solid var(--b2);background:var(--bg);color:var(--tx);font-size:13px">
+          <button onclick="setLearnChannel()" style="background:var(--pl);border:none;color:#fff;padding:6px 12px;border-radius:6px;cursor:pointer;font-size:11px;font-weight:600">Сменить</button>
+        </div>
         <div style="font-size:13px;color:var(--tx);font-weight:600" id="learn-chan">—</div>
         <div style="font-size:11px;color:var(--tx3);margin-top:4px">LEARN_CHANNEL</div>
       </div>
@@ -494,6 +498,7 @@ function initLearnTab(){
 socket.on('learn:config', d=>{
   document.getElementById('learn-chan').textContent=d.channel||'—';
   if(!d.channel)document.getElementById('learn-status').textContent='Настройте LEARN_CHANNEL в Variables';
+  if(d.channel)document.getElementById('learn-channel-input').value=d.channel;
 });
 socket.on('learn:status', d=>{
   learnRunning=d.running;
@@ -511,7 +516,12 @@ socket.on('learn:log', msg=>{
 socket.on('learn:started', ()=>toast('ok','✅ Обучение началось'));
 socket.on('learn:error', e=>toast('err','⚠ '+e.message));
 function toggleLearn(){
-  if(learnRunning)socket.emit('learn:stop');else socket.emit('learn:start');
+  socket.emit(learnRunning?'learn:stop':'learn:start');
+}
+function setLearnChannel(){
+  const chan=document.getElementById('learn-channel-input').value.trim();
+  if(!chan){alert('Введите канал');return;}
+  socket.emit('learn:setChannel',{channel:chan});
 }
 function getLearnData(){socket.emit('learn:getData');}
 function genPreview(){socket.emit('learn:generate');}

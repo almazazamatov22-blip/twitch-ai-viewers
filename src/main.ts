@@ -228,16 +228,23 @@ async function loadFromGitHubRepo(): Promise<any | null> {
       console.log('[github] loadFromGitHubRepo: Fetching large file via download_url...');
       const downloadR = await axios.get(r.data.download_url, {
         headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
+        responseType: 'text',
       });
-      content = downloadR.data;
+      content = downloadR.data as string;
     } else {
       console.log('[github] loadFromGitHubRepo: NO CONTENT and NO download_url');
       return null;
     }
     
-    const parsed = JSON.parse(content);
-    console.log('[github] loadFromGitHubRepo: SUCCESS, messages:', parsed.messages);
-    return parsed;
+    try {
+      const parsed = JSON.parse(content);
+      console.log('[github] loadFromGitHubRepo: SUCCESS, messages:', parsed.messages);
+      return parsed;
+    } catch (e: any) {
+      console.log('[github] loadFromGitHubRepo ERROR: Invalid JSON:', e.message);
+      console.log('[github] loadFromGitHubRepo: content preview:', content.substring(0, 200));
+      return null;
+    }
   } catch (e: any) {
     console.log('[github] loadFromGitHubRepo ERROR:', e.message, 'status:', e.response?.status);
     if (e.response?.status === 404) {
@@ -318,8 +325,9 @@ async function saveToGitHubRepo(data: any): Promise<boolean> {
         console.log('[github] saveToGitHubRepo: Fetching large file via download_url...');
         const downloadR = await axios.get(r.data.download_url, {
           headers: { Authorization: 'Bearer ' + GITHUB_TOKEN },
+          responseType: 'text',
         });
-        content = downloadR.data;
+        content = downloadR.data as string;
       } else {
         content = '{}';
       }

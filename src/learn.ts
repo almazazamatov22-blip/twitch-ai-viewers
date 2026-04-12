@@ -26,13 +26,50 @@ export class LearnBot {
   private emit: (event: string, data: any) => void;
   private groqKey: string = '';
   private channel: string = '';
-  private transcriber: any = null;
+  private lastTranscript = ''; // Last transcript for linking with chat
+  private transcriptTime = 0; // When we heard the transcript
+  private recentTranscripts: string[] = []; // Buffer of recent transcripts
 
   constructor(emit: (event: string, data: any) => void) {
     this.emit = emit;
   }
 
-  // New method: learn from transcript + chat response together
+  // Called when we receive a chat message - LINK with recent transcript
+  learnChatMessage(msg: string): void {
+    const now = Date.now();
+    const words = msg.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+    if (words.length < 2) return;
+    
+    // If recent transcript exists (within last 30 seconds), link them
+    if (this.lastTranscript && now - this.transcriptTime < 30000) {
+      this.learnWithContext(this.lastTranscript, msg);
+    }
+    
+    this.learn(msg);
+    this.messages++;
+    this.emit('learn:status', {
+      running: this.running,
+      messages: this.messages,
+      words: this.words,
+    });
+    if (this.messages % 100 === 0) {
+      this.emit('learn:log', `Изучено ${this.messages} сообщений`);
+    }
+  }
+
+  // Called when we hear a transcript from stream audio
+  onTranscript(text: string): void {
+    if (!text || text.length < 10) return;
+    this.lastTranscript = text;
+    this.transcriptTime = Date.now();
+    this.recentTranscripts.push(text);
+    if (this.recentTranscripts.length > 10) this.recentTranscripts.shift();
+    
+    // Also learn transcript chain itself for generation
+    this.learnTranscript(text);
+  }
+
+  // Learn that "when said X, chat responded with Y"
   learnWithContext(transcript: string, response: string): void {
     if (!transcript || transcript.length < 10 || !response || response.length < 2) return;
     const tWords = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
@@ -42,11 +79,26 @@ export class LearnBot {
     const tKey = tWords.slice(0, Math.min(3, tWords.length)).join(' ');
     if (!this.transcriptChain[tKey]) this.transcriptChain[tKey] = [];
     this.transcriptChain[tKey].push(rWords.slice(0, 4).join(' '));
-    // Also learn the response normally
-    this.learn(response);
   }
 
-  // Generate from transcript context
+  // Just learn transcript words (for generateFromTranscript)
+  learnTranscript(text: string): void {
+    if (!text || text.length < 10) return;
+    const words = text.trim().split(/\s+/).filter(w => w.length > 0);
+    if (words.length < 3) return;
+    for (let i = 0; i <= words.length - this.keyLength; i++) {
+      const key = words.slice(i, i + this.keyLength).join(' ');
+      const next = words[i + this.keyLength];
+      if (!next) continue;
+      if (i === 0) {
+        if (!this.transcriptStarts.includes(key)) this.transcriptStarts.push(key);
+      }
+      if (!this.transcriptChain[key]) this.transcriptChain[key] = [];
+      this.transcriptChain[key].push(next);
+    }
+  }
+
+  // Generate from transcript context - what would chat say?
   generateFromTranscript(transcript: string): string {
     if (Object.keys(this.transcriptChain).length === 0) return '';
     const words = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
@@ -104,16 +156,7 @@ export class LearnBot {
 
         client.on('message', (chan, tags, msg, self) => {
           if (self) return;
-          this.learn(msg);
-          this.messages++;
-          this.emit('learn:status', {
-            running: this.running,
-            messages: this.messages,
-            words: this.words,
-          });
-          if (this.messages % 100 === 0) {
-            this.emit('learn:log', `Изучено ${this.messages} сообщений`);
-          }
+          this.learnChatMessage(msg); // Links chat with recent transcript
         });
 
         client.on('connected', () => {
@@ -190,6 +233,7 @@ export class LearnBot {
               const transcript = (text as any)?.text?.trim();
               if (transcript && transcript.length > 10) {
                 console.log('[learn] Transcript heard:', transcript.slice(0, 80));
+                this.onTranscript(transcript);
                 this.emit('learn:transcript', transcript);
               }
             }

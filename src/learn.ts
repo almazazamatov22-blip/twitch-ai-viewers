@@ -132,7 +132,10 @@ export class LearnBot {
     
     // Start transcription if we have groqKey
     if (this.groqKey) {
+      this.emit('learn:log', 'Запуск транскрипции для ' + this.channel);
       this.startTranscription();
+    } else {
+      this.emit('learn:log', 'ВНИМАНИЕ: GROQ_API_KEY не установлен - транскрипция не будет работать');
     }
     
     const chan = this.channel;

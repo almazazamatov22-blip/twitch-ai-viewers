@@ -646,13 +646,17 @@ io.on('connection', socket => {
       fs.writeFileSync(filepath, JSON.stringify(data, null, 2));
       io.emit('learn:log', 'Сохранено локально: ' + path.basename(filepath));
       
-      // Save to GitHub
-      console.log('[github] Manual save to GitHub...');
-      const ok = await saveToGitHub(data);
-      if (ok) {
-        io.emit('learn:log', '✅ Сохранено в GitHub Gist');
+      // Save to GitHub Repo (not Gist)
+      console.log('[github] Manual save to GitHub Repo...');
+      if (GITHUB_TOKEN && GITHUB_REPO) {
+        const ok = await saveToGitHubRepo(data);
+        if (ok) {
+          io.emit('learn:log', '✅ Сохранено в GitHub Repo');
+        } else {
+          io.emit('learn:log', '❌ Ошибка сохранения');
+        }
       } else {
-        io.emit('learn:log', '❌ Ошибка сохранения в GitHub');
+        io.emit('learn:log', '⚠️ GitHub Repo не настроен');
       }
     }
   });

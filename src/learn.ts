@@ -143,6 +143,9 @@ export class LearnBot {
     for (let i = 0; i <= words.length - this.keyLength; i++) {
       const key = words.slice(i, i + this.keyLength).join(' ');
       const next = words[i + this.keyLength];
+      // Fix: skip end-of-sentence positions where next is undefined
+      // (avoids storing null values in the chain JSON)
+      if (next === undefined) continue;
       if (i === 0) this.starts.push(key);
       if (!this.chain[key]) this.chain[key] = [];
       this.chain[key].push(next);
@@ -242,36 +245,38 @@ export class LearnBot {
       this.emit('learn:log', '⚠️ GROQ_API_KEY не установлен — транскрипция не работает');
     }
 
-    // ── Connect chat listeners ─────────────────────────────────────────────
-    this.emit('learn:log', `Подключение ${tokens.length} ботов к чату ${chan}...`);
-
-    for (let i = 0; i < tokens.length; i++) {
-      const token = tokens[i];
-      const username = 'learn_bot_' + (i + 1);
+    // ── Connect a SINGLE dedicated reader to chat ─────────────────────────
+    // Important: only ONE client listens to messages.
+    // Using all tokens would learn each message N times (one per bot).
+    const readerToken = tokens[0];
+    if (!readerToken) {
+      this.emit('learn:log', '⚠️ Нет токена для чтения чата');
+    } else {
+      this.emit('learn:log', `Подключение читателя чата к ${chan}...`);
       try {
-        const client = tmi.client({
+        const reader = tmi.client({
           channels: [chan],
-          identity: { username, password: token },
+          identity: { username: 'learn_reader', password: readerToken },
           options: { debug: false },
         });
 
-        client.on('message', (_ch, _tags, msg, self) => {
+        reader.on('message', (_ch, _tags, msg, self) => {
           if (self) return;
           this.learnChatMessage(msg);
         });
 
-        client.on('connected', () => {
-          this.emit('learn:log', `✅ ${username} подключён к ${chan}`);
+        reader.on('connected', () => {
+          this.emit('learn:log', `✅ Читатель подключён к ${chan}`);
         });
 
-        client.on('disconnected', () => {
-          this.emit('learn:log', `❌ ${username} отключён`);
+        reader.on('disconnected', () => {
+          this.emit('learn:log', `❌ Читатель отключён от ${chan}`);
         });
 
-        client.connect();
-        this.clients.push({ client, username });
+        reader.connect();
+        this.clients.push({ client: reader, username: 'learn_reader' });
       } catch (e: any) {
-        this.emit('learn:log', `⚠ ${username}: ${e.message}`);
+        this.emit('learn:log', `⚠ Читатель: ${e.message}`);
       }
     }
 

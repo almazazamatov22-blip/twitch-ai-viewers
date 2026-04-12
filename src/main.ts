@@ -630,7 +630,6 @@ io.on('connection', socket => {
       const savedData = await loadLearnData();
       if (savedData) {
         learnBot.loadData(savedData);
-        bestMessageCount = Math.max(bestMessageCount, savedData.messages || 0);
         io.emit('learn:log', '✅ Загружено ' + savedData.messages + ' сообщений');
       } else {
         io.emit('learn:log', '⚠️ Сохранённых данных нет — начинаем с нуля');

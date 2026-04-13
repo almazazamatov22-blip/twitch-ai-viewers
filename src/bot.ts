@@ -144,9 +144,22 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
                 this.learnBot.generate(seed);
             }
             
-            if (markovGen && markovGen.length > 5 && markovGen.length <= 50) {
+            if (markovGen && markovGen.length > 5) {
               // Only use Markov, no AI at all
               msg = markovGen.replace(/[.,!?;:]/g, '').trim();
+              // Check for garbage: repeated words, @ mentions, usernames
+              const words = msg.split(/\s+/);
+              let repeats = 0;
+              let prevWord = '';
+              for (const w of words) {
+                if (w === prevWord) repeats++;
+                prevWord = w;
+              }
+              // Skip if: 3+ repeats, has @, or too short
+              if (repeats >= 3 || msg.includes('@') || words.length < 2) {
+                console.log('[bot] Skipping garbage:', msg);
+                return;
+              }
             } else {
               // No markov data - skip response
               return;

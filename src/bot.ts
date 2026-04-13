@@ -153,8 +153,8 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
               msg = markovGen.replace(/[.,!?;:]/g, '').trim();
               // Simple checks for garbage
               const words = msg.split(/\s+/);
-              // Too short (<2) or too long (>20)
-              if (words.length < 2 || words.length > 20) {
+              // Too long (>20)
+              if (words.length > 20) {
                 console.log('[bot] Skip: length', words.length);
                 return;
               }

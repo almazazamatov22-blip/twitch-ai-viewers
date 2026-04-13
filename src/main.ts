@@ -981,13 +981,16 @@ async function autoStart(): Promise<void> {
     }, delay);
   }
 
-  // Start transcription
-  transcriber = new TranscriptionService(cfg.groqKey, cfg.channel);
-  transcriber.start((result) => {
-    console.log('[transcription] TEXT:', result.text.slice(0, 100));
-    io.emit('transcription:new', { text: result.text, timestamp: result.timestamp });
-    if (manager) manager.onTranscription(result.text);
-  });
+  // Start transcription only if stream is live
+  if (info.live) {
+    transcriber = new TranscriptionService(cfg.groqKey, cfg.channel);
+    transcriber.start((result) => {
+      console.log('[transcription] TEXT:', result.text.slice(0, 100));
+      io.emit('transcription:new', { text: result.text, timestamp: result.timestamp });
+      if (manager) manager.onTranscription(result.text);
+    });
+    console.log('[transcription] Started for', cfg.channel, '(live)');
+  }
 
   io.emit('stream:info', { live: info.live, game: (info as any).game, viewers: (info as any).viewers });
 
@@ -998,6 +1001,21 @@ async function autoStart(): Promise<void> {
     io.emit('stream:info', { live: si.live, game: (si as any).game, viewers: (si as any).viewers });
     if ((si as any).viewers != null) io.emit('stream:viewers', { viewers: (si as any).viewers });
     if (manager && (si as any).game) manager.setGame((si as any).game);
+    
+    // Start/stop transcription based on live status
+    if (si.live && !transcriber) {
+      transcriber = new TranscriptionService(cfg.groqKey, cfg.channel);
+      transcriber.start((result) => {
+        console.log('[transcription] TEXT:', result.text.slice(0, 100));
+        io.emit('transcription:new', { text: result.text, timestamp: result.timestamp });
+        if (manager) manager.onTranscription(result.text);
+      });
+      console.log('[transcription] Started for', cfg.channel, '(now live)');
+    } else if (!si.live && transcriber) {
+      transcriber.stop();
+      transcriber = null;
+      console.log('[transcription] Stopped for', cfg.channel, '(now offline)');
+    }
   }, 30000);
 
   // Save history every 10 minutes - save EVERYTHING

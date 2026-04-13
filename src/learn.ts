@@ -11,6 +11,52 @@ interface BotClient {
   username: string;
 }
 
+// ── Message quality filter ───────────────────────────────────────────────
+// Returns true if the message should be SKIPPED (is noise/spam/emote)
+function isDirtyMessage(text: string): boolean {
+  if (!text || text.trim().length < 3) return true;
+  const t = text.trim();
+  const tLow = t.toLowerCase();
+  const words = t.split(/\s+/);
+
+  // @mentions — learn.ts should never learn phrases starting with a tag
+  if (/@\w/.test(t)) return true;
+
+  // URLs / links
+  if (/https?:\/\/|www\.|\.com|\.ru|\.site|\.net|\.io|\.gg/i.test(t)) return true;
+
+  // Gambling / ad keywords
+  const adWords = ['бонус','регистрац','betboom','sportbb','казино','1xbet',
+                   'mostbet','промокод','депозит','забери','ставк','выигр'];
+  if (adWords.some(w => tLow.includes(w))) return true;
+
+  // Emoji: 3+ emoji = spam
+  const emojiCount = [...t].filter(c => {
+    const cp = c.codePointAt(0) || 0;
+    return (cp >= 0x1F300 && cp <= 0x1FFFF) || (cp >= 0x2600 && cp <= 0x27BF);
+  }).length;
+  if (emojiCount >= 3) return true;
+  const nonSpace = t.replace(/\s/g, '').length;
+  if (nonSpace > 0 && emojiCount / nonSpace > 0.4) return true;
+
+  // Same word repeated 3+ times (LUL LUL LUL, DinoDance DinoDance DinoDance)
+  if (words.length >= 3 && new Set(words).size === 1) return true;
+
+  // CamelCase emote pair (DinoDance DinoDance)
+  if (words.length === 2 && words[0] === words[1] && /^[A-Z][a-z]+[A-Z]/.test(words[0])) return true;
+
+  // Known channel-specific emote prefixes
+  const emotePrefixes = ['margos8','alkoxl','nez','deadp','powerup','bloodtrail',
+                         'curselit','subprise','kappaross','dinodance','pausechamp',
+                         'seemsgood','henlothere','peguucka','omegalul'];
+  if (emotePrefixes.some(p => tLow.startsWith(p))) return true;
+
+  // Pure caps latin <= 20 chars <= 3 words = likely emote (KEKW, PogChamp, LULW)
+  if (/^[A-Z0-9\s]+$/.test(t) && t.length <= 20 && words.length <= 3) return true;
+
+  return false;
+}
+
 export class LearnBot {
   private clients: BotClient[] = [];
   private chain: MarkovChain = {};
@@ -61,6 +107,9 @@ export class LearnBot {
 
   // Called on every incoming chat message from LEARN_CHANNEL
   learnChatMessage(msg: string): void {
+    // Skip noise: @mentions, links, emoji spam, ads, emote-only messages
+    if (isDirtyMessage(msg)) return;
+
     const words = msg.toLowerCase().split(/\s+/).filter(w => w.length > 1);
     if (words.length < 2) return;
 

@@ -564,11 +564,22 @@ function mergeLearnData(local: any, remote: any): any {
   if (!local)  return remote;
 
   // Merge chain: combine all values per key, filter nulls
-  const chain: Record<string, string[]> = { ...remote.chain };
+  // Also filter pure emoji/emote spam keys (same word repeated)
+  const isSpamKey = (k: string) => {
+    const parts = k.split(' ');
+    return parts.length === 2 && parts[0] === parts[1] && !/[а-яёА-ЯЁa-zA-Z]/.test(k);
+  };
+  const remoteChainClean: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(remote.chain || {})) {
+    if (!isSpamKey(k)) remoteChainClean[k] = v as string[];
+  }
+  const chain: Record<string, string[]> = { ...remoteChainClean };
   for (const [key, vals] of Object.entries(local.chain || {}) as [string, any[]][]) {
     const clean = vals.filter((v: any) => v != null);
     if (chain[key]) {
-      chain[key] = [...chain[key].filter((v: any) => v != null), ...clean];
+      const combined = [...chain[key].filter((v: any) => v != null), ...clean];
+      // Cap at 60 values per key to prevent bloat from repeated merges
+      chain[key] = combined.length > 60 ? combined.slice(-60) : combined;
     } else {
       chain[key] = clean;
     }
@@ -600,7 +611,7 @@ function mergeLearnData(local: any, remote: any): any {
     chain,
     starts,
     contextChain: ctx,
-    messages: (remote.messages || 0) + Math.max(0, (local.messages || 0) - (remote.messages || 0)),
+    messages: Math.max(remote.messages || 0, local.messages || 0),
     words: Math.max(remote.words || 0, local.words || 0),
     uniqueWords: Object.keys(chain).length,
     contextLinks: Object.keys(ctx).length,

@@ -108,8 +108,8 @@ export class BotManager {
       return;
     }
     
-    // Only respond 70% of the time to feel natural
-    if (Math.random() > 0.7) {
+    // Only respond 30% of the time to feel natural
+    if (Math.random() > 0.3) {
       console.log('[bot] Skipping transcription (random)');
       return;
     }
@@ -117,7 +117,7 @@ export class BotManager {
     if (!allBots.length) return;
 
     const maxCount = this.botsPerTranscript === 99 ? allBots.length : this.botsPerTranscript;
-    const count = Math.max(1, Math.min(maxCount, allBots.length) - (this.botsPerTranscript === 99 ? 0 : (Math.random() < 0.4 ? 1 : 0)));
+    const count = Math.max(1, Math.min(maxCount, allBots.length));
     const responding: BotInstance[] = [];
     for (let i = 0; i < count; i++) {
       responding.push(allBots[(this.transcriptResponseIdx + i) % allBots.length]);

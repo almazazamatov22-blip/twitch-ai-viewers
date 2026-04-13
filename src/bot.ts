@@ -145,18 +145,11 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
             }
             
             if (markovGen && markovGen.length > 5) {
-              // Use AI to verify and fix the Markov output
-              const verified = await this.ai.verifyAndFix(
-                bot.username, markovGen, text, this.language, bot.index
-              );
-              // Check if verified is valid (not empty, not REJECT, within limits)
-              if (verified && verified !== 'REJECT' && verified.length <= 30) {
-                // Strip punctuation
-                msg = verified.replace(/[.,!?;:]/g, '').trim();
-              } else if (markovGen.length <= 30) {
-                msg = markovGen; // fallback to original markov
+              // Skip AI verifyAndFix - use markov directly
+              if (markovGen.length <= 30) {
+                msg = markovGen.replace(/[.,!?;:]/g, '').trim();
               } else {
-                // REJECT or too long - use pure AI instead
+                // Too long - use AI
                 msg = await this.ai.generateFromTranscription(
                   bot.username, text, this.language, bot.index
                 );

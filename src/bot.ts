@@ -170,6 +170,16 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
                 console.log('[bot] Skip: has @', msg);
                 return;
               }
+              // Has link (http, https, www, twitch.tv, t.me)
+              if (msg.match(/https?:\/\/|www\.|twitch\.tv\/|t\.me\//i)) {
+                console.log('[bot] Skip: has link', msg);
+                return;
+              }
+              // Whisper noise: DimaTorzok, or short юль/юля
+              if (msg.toLowerCase().includes('dimatorzok') || msg.toLowerCase() === 'юль' || msg.toLowerCase() === 'юля') {
+                console.log('[bot] Skip: whisper noise', msg);
+                return;
+              }
             } else {
               return;
             }

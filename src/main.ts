@@ -263,8 +263,8 @@ function mergeMarkovData(existing: any, newData: any): any {
     chain: { ...existing.chain },
     starts: [...(existing.starts || [])],
     contextChain: { ...(existing.contextChain || existing.transcriptChain || {}) },
-    messages: (existing.messages || 0) + (newData.messages || 0),
-    words: (existing.words || 0) + (newData.words || 0),
+    messages: Math.max(existing.messages || 0, newData.messages || 0),
+    words: Math.max(existing.words || 0, newData.words || 0),
   };
   
   for (const key of Object.keys(newData.chain)) {

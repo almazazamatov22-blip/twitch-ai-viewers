@@ -144,23 +144,12 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
                 this.learnBot.generate(seed);
             }
             
-            if (markovGen && markovGen.length > 5) {
-              // Skip AI verifyAndFix - use markov directly
-              if (markovGen.length <= 30) {
-                msg = markovGen.replace(/[.,!?;:]/g, '').trim();
-              } else {
-                // Too long - use AI
-                msg = await this.ai.generateFromTranscription(
-                  bot.username, text, this.language, bot.index
-                );
-                msg = (msg || '').replace(/[.,!?;:]/g, '').trim();
-              }
+            if (markovGen && markovGen.length > 5 && markovGen.length <= 50) {
+              // Only use Markov, no AI at all
+              msg = markovGen.replace(/[.,!?;:]/g, '').trim();
             } else {
-              // Markov failed, fallback to AI
-              msg = await this.ai.generateFromTranscription(
-                bot.username, text, this.language, bot.index
-              );
-              msg = (msg || '').replace(/[.,!?;:]/g, '').trim();
+              // No markov data - skip response
+              return;
             }
           } else {
             // Not enough data, use pure AI

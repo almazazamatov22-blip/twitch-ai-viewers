@@ -875,6 +875,13 @@ io.on('connection', socket => {
   });
 
   socket.on('disconnect', () => console.log('[server] disconnected', socket.id));
+
+  socket.on('set:live', (data: { live: boolean }) => {
+    if (manager) {
+      manager.setLive(data.live);
+      console.log('[server] set:live', data.live);
+    }
+  });
 });
 
 // ── Auto-start ───────────────────────────────────────────────────────────────
@@ -923,6 +930,7 @@ async function autoStart(): Promise<void> {
       savedRealChatHistory: saved.realChatHistory || [],
       learnBot: learnBot,
       currentGame: (info as any).game || '',
+      isLive: info.live,
     },
     (event, data) => {
       io.emit(event, data);

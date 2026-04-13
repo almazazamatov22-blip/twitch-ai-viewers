@@ -33,6 +33,7 @@ export class BotManager {
   private pointsService: ChannelPointsService | null = null;
   private learnBot: any = null;
   private currentGame = '';
+  private isLive = false;
   private transcriptBots: Set<string> | null = null; // null = all bots
 
   constructor(
@@ -46,21 +47,24 @@ export class BotManager {
       savedPersonas?: Record<string, PersonaConfig>;
       botsPerTranscript?: number;
       channelId?: string;
+      isLive?: boolean;
+      currentGame?: string;
       clientId?: string;
       savedHistory?: Record<string, { role: string; content: string; time: number }[]>;
       savedTranscriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
       savedRealChatHistory?: { username: string; message: string; time: number }[];
       learnBot?: any;
-      currentGame?: string;
     },
     emit: EmitFn
   ) {
     this.channel = channel.toLowerCase().replace(/^#/, '');
     this.language = opts.language;
+    this.isLive = opts.isLive || false;
     this.emit = emit;
     this.botsPerTranscript = opts.botsPerTranscript || 2;
     this.learnBot = opts.learnBot || null;
     this.currentGame = opts.currentGame || '';
+    this.isLive = opts.isLive || false;
     this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas, opts.savedHistory, opts.savedTranscriptHistory, opts.savedRealChatHistory);
     this.ai.setChannel(this.channel);
 
@@ -251,7 +255,10 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
       if (this.stopped) { client.disconnect().catch(() => {}); return; }
       bot.connected = true;
       this.emit('bot:status', { username: cfg.username, state: 'connected', message: 'Подключён' });
-      this.startPresence(bot);
+      // Start presence only if stream is live
+      if (this.isLive) {
+        this.startPresence(bot);
+      }
       // Connect to PubSub for channel points
       if (this.pointsService) {
         this.pointsService.connectBot(cfg.username, token).catch(() => {});
@@ -408,6 +415,10 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
   }
   setGame(game: string): void {
     this.currentGame = game;
-    this.ai.setGame(game);
+  }
+  
+  setLive(live: boolean): void {
+    this.isLive = live;
+    console.log('[bot] isLive set to:', live);
   }
 }

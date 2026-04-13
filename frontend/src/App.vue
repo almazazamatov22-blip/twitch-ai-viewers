@@ -165,6 +165,8 @@ onMounted(() => {
     streamLive.value = d.live
     streamGame.value = d.game || ''
     streamViewers.value = d.viewers != null ? d.viewers : 0
+    // Update bots live status
+    socket.emit('set:live', { live: d.live })
   })
 
   s.on('bot:error', d => {

@@ -86,7 +86,7 @@ export class BotManager {
       if (bot.connected && textLower.includes(name.toLowerCase())) {
         console.log('[bot] Bot mentioned:', name);
         setTimeout(async () => {
-          if (!this.stopped && bot.connected && Date.now() - bot.lastMsgTime > 5000) {
+          if (!this.stopped && bot.connected && Date.now() - bot.lastMsgTime > 2000 + Math.random() * 8000) {
             const msg = await this.ai.generateFromTranscription(bot.username, text, this.language, bot.index);
             if (msg && !this.stopped) {
               await bot.client.say('#' + this.channel, msg);
@@ -104,8 +104,8 @@ export class BotManager {
       return;
     }
     
-    // Only respond 60% of the time to feel natural
-    if (Math.random() > 0.6) {
+    // Only respond 70% of the time to feel natural
+    if (Math.random() > 0.7) {
       console.log('[bot] Skipping transcription (random)');
       return;
     }

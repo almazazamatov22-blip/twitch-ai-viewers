@@ -144,11 +144,29 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
                 this.learnBot.generate(seed);
             }
             
-            if (markovGen && markovGen.length > 5 && markovGen.length <= 50) {
+            if (markovGen && markovGen.length > 5) {
               // Only use Markov, no AI at all
               msg = markovGen.replace(/[.,!?;:]/g, '').trim();
+              // Simple checks for garbage
+              const words = msg.split(/\s+/);
+              // Too short (<2) or too long (>20)
+              if (words.length < 2 || words.length > 20) {
+                console.log('[bot] Skip: length', words.length);
+                return;
+              }
+              // 3+ same word in a row
+              let repeats = 0, prev = '';
+              for (const w of words) { if (w === prev) repeats++; else repeats = 0; prev = w; }
+              if (repeats >= 3) {
+                console.log('[bot] Skip: repeats', msg);
+                return;
+              }
+              // Has @ or nickname pattern
+              if (msg.includes('@') || msg.match(/@[a-zA-Z0-9_]+/)) {
+                console.log('[bot] Skip: has @', msg);
+                return;
+              }
             } else {
-              // No markov data - skip response
               return;
             }
           } else {

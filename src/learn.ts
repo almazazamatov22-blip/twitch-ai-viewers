@@ -192,28 +192,36 @@ export class LearnBot {
     if (!transcript) return '';
     const words = transcript.toLowerCase().split(/\s+/).filter(w => w.length > 2);
 
-    // Try context chain first (longer keys preferred)
+    // Try context chain first (collect all options)
+    const allOptions: string[] = [];
     for (let len = Math.min(3, words.length); len >= 1; len--) {
       const key = words.slice(0, len).join(' ');
       const options = this.contextChain[key];
       if (options && options.length > 0) {
-        const base = options[Math.floor(Math.random() * options.length)];
-        console.log('[learn] generateFromTranscript: context match key="' + key + '" → "' + base + '"');
-        return base;
+        allOptions.push(...options);
       }
     }
+    if (allOptions.length > 0) {
+      const base = allOptions[Math.floor(Math.random() * allOptions.length)];
+      console.log('[learn] generateFromTranscript: context random from ' + allOptions.length + ' options');
+      return base;
+    }
 
-    // Also try mid-transcript keys
+    // Also try mid-transcript keys with randomness
+    const midOptions: string[] = [];
     for (let i = 1; i < words.length - 1; i++) {
       for (let len = Math.min(3, words.length - i); len >= 1; len--) {
         const key = words.slice(i, i + len).join(' ');
         const options = this.contextChain[key];
         if (options && options.length > 0) {
-          const base = options[Math.floor(Math.random() * options.length)];
-          console.log('[learn] generateFromTranscript: mid-match key="' + key + '" → "' + base + '"');
-          return base;
+          midOptions.push(...options);
         }
       }
+    }
+    if (midOptions.length > 0) {
+      const base = midOptions[Math.floor(Math.random() * midOptions.length)];
+      console.log('[learn] generateFromTranscript: random from ' + midOptions.length + ' options');
+      return base;
     }
 
     return '';

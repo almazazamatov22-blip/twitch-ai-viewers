@@ -160,6 +160,21 @@ export class BotManager {
               }
               msg = markovGen.replace(/[.,!?;:]/g, '').trim();
               source = 'markov';
+
+              // ── БАГ 3 FIX: Groq-коррекция Markov-текста ──────────────────
+              // verifyAndFix фильтрует бред и делает ответ осмысленным
+              try {
+                const corrected = await this.ai.verifyAndFix(
+                  bot.username, msg, text, this.language, bot.index
+                );
+                if (corrected && corrected.trim().length >= 2) {
+                  msg = corrected.trim().slice(0, 200);
+                  source = 'markov+groq';
+                }
+              } catch (fixErr: any) {
+                console.error('[bot] verifyAndFix error:', fixErr.message);
+                // оставляем исходный markov-текст как fallback
+              }
             }
           }
 
@@ -313,6 +328,11 @@ export class BotManager {
 
     const poll = async () => {
       if (this.stopped || !bot.connected) return;
+      // ── БАГ 2 FIX: не делаем запросы когда стрим оффлайн ──────────────────
+      if (!this.isLive) {
+        console.log('[presence] stream offline, skipping poll for', bot.username);
+        return;
+      }
       try {
         const { default: axios } = await import('axios');
         const gql = await axios.post('https://gql.twitch.tv/gql', [{

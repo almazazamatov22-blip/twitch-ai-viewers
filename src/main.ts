@@ -122,6 +122,7 @@ interface SavedConfig {
   personas: Record<string, PersonaConfig>;
   phraseGroups: Record<string, string[]>;
   botsPerTranscript?: number;
+  transcriptBots?: string[];   // ── БАГ 1 FIX: какие боты отвечают на транскрипцию
   botHistories?: Record<string, { role: string; content: string; time: number }[]>;
   transcriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
   realChatHistory?: { username: string; message: string; time: number }[];
@@ -701,7 +702,12 @@ app.post('/api/claim-points', async (_req, res) => {
 io.on('connection', socket => {
   console.log('[server] connected', socket.id);
   const cfg = readEnvConfig();
-  socket.emit('config', { channel: cfg.channel, botsPerTranscript: saved.botsPerTranscript || 2 });
+  socket.emit('config', { 
+    channel: cfg.channel, 
+    botsPerTranscript: saved.botsPerTranscript || 2,
+    // ── БАГ 1 FIX: восстанавливаем T-флаги после перезапуска сервера ──────
+    transcriptBots: saved.transcriptBots || [],
+  });
   socket.emit('personas:update', saved.personas);
   socket.emit('phrases:update', saved.phraseGroups);
   if (isStarted && startedBots.length > 0) {
@@ -870,7 +876,10 @@ io.on('connection', socket => {
   socket.on('set:transcript_bots', (data: { usernames: string[] }) => {
     if (manager && Array.isArray(data.usernames)) {
       manager.setTranscriptBots(data.usernames);
-      console.log('[server] transcript bots set:', data.usernames);
+      // ── БАГ 1 FIX: сохраняем на диск чтобы не сбрасывалось при перезапуске ──
+      saved.transcriptBots = data.usernames;
+      saveToDisk(saved, currentChannel);
+      console.log('[server] transcript bots set and saved:', data.usernames.length, 'bots');
     }
   });
 
@@ -954,6 +963,12 @@ async function autoStart(): Promise<void> {
   isStarted = true;
   io.emit('bots:started', { bots: startedBots });
   console.log('[server] started', startedBots.length, 'bots');
+
+  // ── БАГ 1 FIX: восстанавливаем T-флаги ботов из сохранённого конфига ────
+  if (saved.transcriptBots && saved.transcriptBots.length > 0) {
+    manager.setTranscriptBots(saved.transcriptBots);
+    console.log('[server] Restored transcriptBots:', saved.transcriptBots.length, 'bots:', saved.transcriptBots);
+  }
   
 // Send greetings ONLY when stream is live
   const GREETINGS = [

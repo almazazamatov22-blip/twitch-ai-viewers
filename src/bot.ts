@@ -33,6 +33,7 @@ export class BotManager {
   private pointsService: ChannelPointsService | null = null;
   private learnBot: any = null;
   private currentGame = '';
+  private isLive = true;
   private transcriptBots: Set<string> | null = null; // null = all bots
 
   constructor(
@@ -52,6 +53,7 @@ export class BotManager {
       savedRealChatHistory?: { username: string; message: string; time: number }[];
       learnBot?: any;
       currentGame?: string;
+      isLive?: boolean;
     },
     emit: EmitFn
   ) {
@@ -61,6 +63,7 @@ export class BotManager {
     this.botsPerTranscript = opts.botsPerTranscript || 2;
     this.learnBot = opts.learnBot || null;
     this.currentGame = opts.currentGame || '';
+    this.isLive = opts.isLive !== false;
     this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas, opts.savedHistory, opts.savedTranscriptHistory, opts.savedRealChatHistory);
     this.ai.setChannel(this.channel);
 
@@ -414,5 +417,9 @@ export class BotManager {
   setGame(game: string): void {
     this.currentGame = game;
     this.ai.setGame(game);
+  }
+  setLive(live: boolean): void {
+    this.isLive = live;
+    console.log('[manager] stream live:', live);
   }
 }

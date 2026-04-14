@@ -33,7 +33,6 @@ export class BotManager {
   private pointsService: ChannelPointsService | null = null;
   private learnBot: any = null;
   private currentGame = '';
-  private isLive = false;
   private transcriptBots: Set<string> | null = null; // null = all bots
 
   constructor(
@@ -47,24 +46,21 @@ export class BotManager {
       savedPersonas?: Record<string, PersonaConfig>;
       botsPerTranscript?: number;
       channelId?: string;
-      isLive?: boolean;
-      currentGame?: string;
       clientId?: string;
       savedHistory?: Record<string, { role: string; content: string; time: number }[]>;
       savedTranscriptHistory?: { heard: string; timestamp: number; responses: { username: string; message: string }[] }[];
       savedRealChatHistory?: { username: string; message: string; time: number }[];
       learnBot?: any;
+      currentGame?: string;
     },
     emit: EmitFn
   ) {
     this.channel = channel.toLowerCase().replace(/^#/, '');
     this.language = opts.language;
-    this.isLive = opts.isLive || false;
     this.emit = emit;
     this.botsPerTranscript = opts.botsPerTranscript || 2;
     this.learnBot = opts.learnBot || null;
     this.currentGame = opts.currentGame || '';
-    this.isLive = opts.isLive || false;
     this.ai = new AIService(groqKey, opts.settings, opts.savedPersonas, opts.savedHistory, opts.savedTranscriptHistory, opts.savedRealChatHistory);
     this.ai.setChannel(this.channel);
 
@@ -108,14 +104,11 @@ export class BotManager {
       return;
     }
     
-    // Only respond 30% of the time to feel natural
-    if (Math.random() > 0.3) {
-      console.log('[bot] Skipping transcription (random)');
-      return;
-    }
+    // Always respond — chat should never go silent because of random skipping
     const allBots = Array.from(this.bots.values()).filter(b => b.connected && (!this.transcriptBots || this.transcriptBots.has(b.username.toLowerCase())));
     if (!allBots.length) return;
 
+    // Pick exactly botsPerTranscript bots, rotating through the list
     const maxCount = this.botsPerTranscript === 99 ? allBots.length : this.botsPerTranscript;
     const count = Math.max(1, Math.min(maxCount, allBots.length));
     const responding: BotInstance[] = [];
@@ -126,78 +119,76 @@ export class BotManager {
 
     for (let i = 0; i < responding.length; i++) {
       const bot = responding[i];
-      const delay = i * (2000 + Math.random() * 3000) + Math.random() * 2000;
+      // Stagger messages naturally: first bot after 1-3s, each next after 3-6s
+      const delay = i * (3000 + Math.random() * 3000) + 1000 + Math.random() * 2000;
       setTimeout(async () => {
         if (this.stopped || !bot.connected) return;
-if (Date.now() - bot.lastMsgTime < 5000) return;
+        if (Date.now() - bot.lastMsgTime < 4000) return;
         try {
           let msg = '';
-          
-          // 100% Markov Chain generation with AI verification
+          let source = 'ai';
+
           if (this.learnBot && this.learnBot.hasEnoughData && this.learnBot.hasEnoughData(100)) {
-            // Generate unique for each bot using bot username as seed
-            const seed = bot.username + Date.now();
+            // Try Markov with transcript context first
             let markovGen = '';
             if (this.learnBot.generateFromTranscript) {
-              markovGen = this.learnBot.generateFromTranscript(text + seed) || '';
+              markovGen = this.learnBot.generateFromTranscript(text) || '';
             }
-            // Fallback to regular markov if no transcript context
-            if (!markovGen || markovGen.length < 5) {
-              markovGen = this.learnBot.generateWithContext ? 
-                this.learnBot.generateWithContext(text + seed, 5) : 
-                this.learnBot.generate(seed);
+            // Fallback to context-aware Markov
+            if (!markovGen || markovGen.length < 4) {
+              markovGen = this.learnBot.generateWithContext
+                ? this.learnBot.generateWithContext(text, 3)
+                : this.learnBot.generate();
             }
-            
-            if (markovGen && markovGen.length > 5) {
-              // Only use Markov, no AI at all
+
+            if (markovGen && markovGen.length >= 4) {
+              // Natural length limit: keep only complete sentences up to 12 words max.
+              // We don't cut mid-word — instead limit at generation level by words.
+              const words = markovGen.trim().split(/\s+/);
+              const MAX_WORDS = 12;
+              if (words.length > MAX_WORDS) {
+                // Find a natural break point: prefer stopping after sentence-ending word
+                // (a word that ends with . ! ? ) or just take first MAX_WORDS words
+                let cutAt = MAX_WORDS;
+                for (let wi = MAX_WORDS - 1; wi >= 4; wi--) {
+                  if (/[.!?)]$/.test(words[wi])) { cutAt = wi + 1; break; }
+                }
+                markovGen = words.slice(0, cutAt).join(' ');
+              }
               msg = markovGen.replace(/[.,!?;:]/g, '').trim();
-              // Simple checks for garbage
-              const words = msg.split(/\s+/);
-              // Too long (>20)
-              if (words.length > 20) {
-                console.log('[bot] Skip: length', words.length);
-                return;
-              }
-              // 3+ same word in a row
-              let repeats = 0, prev = '';
-              for (const w of words) { if (w === prev) repeats++; else repeats = 0; prev = w; }
-              if (repeats >= 3) {
-                console.log('[bot] Skip: repeats', msg);
-                return;
-              }
-              // Has @ or nickname pattern
-              if (msg.includes('@') || msg.match(/@[a-zA-Z0-9_]+/)) {
-                console.log('[bot] Skip: has @', msg);
-                return;
-              }
-              // Has link (http, https, www, twitch.tv, t.me)
-              if (msg.match(/https?:\/\/|www\.|twitch\.tv\/|t\.me\//i)) {
-                console.log('[bot] Skip: has link', msg);
-                return;
-              }
-              // Whisper noise: DimaTorzok, or short юль/юля
-              if (msg.toLowerCase().includes('dimatorzok') || msg.toLowerCase() === 'юль' || msg.toLowerCase() === 'юля') {
-                console.log('[bot] Skip: whisper noise', msg);
-                return;
-              }
-            } else {
-              return;
+              source = 'markov';
             }
-          } else {
-            // Not enough data, use pure AI
-            msg = await this.ai.generateFromTranscription(
-              bot.username, text, this.language, bot.index
-            );
           }
-          
+
+          // Fallback to AI if Markov produced nothing
+          if (!msg) {
+            msg = await this.ai.generateFromTranscription(bot.username, text, this.language, bot.index);
+            source = 'ai';
+          }
+
           if (!msg || this.stopped) return;
-          console.log('[bot]', bot.username, '→', '"' + msg + '"');
+
+          // Trim to Twitch limit
+          msg = msg.slice(0, 200);
+
+          console.log('[bot]', bot.username, `(${source})`, '→', '"' + msg + '"');
           await bot.client.say('#' + this.channel, msg);
           bot.messages++;
           bot.lastMsgTime = Date.now();
           this.emit('bot:message', { username: bot.username, message: msg, count: bot.messages });
-          const log = this.ai.transcriptLog;
-          if (log.length) this.emit('transcript:entry', log[log.length - 1]);
+
+          // Always emit transcript:entry so the UI panel updates
+          const entry = {
+            heard: text,
+            username: bot.username,
+            message: msg,
+            persona: source,
+            timestamp: Date.now(),
+          };
+          this.ai.transcriptLog.push(entry);
+          if (this.ai.transcriptLog.length > 2000) this.ai.transcriptLog.shift();
+          this.emit('transcript:entry', entry);
+
         } catch (e: any) {
           const m = String(e?.message || e);
           if (!m.includes('Not connected') && !m.includes('No response'))
@@ -265,10 +256,7 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
       if (this.stopped) { client.disconnect().catch(() => {}); return; }
       bot.connected = true;
       this.emit('bot:status', { username: cfg.username, state: 'connected', message: 'Подключён' });
-      // Start presence only if stream is live
-      if (this.isLive) {
-        this.startPresence(bot);
-      }
+      this.startPresence(bot);
       // Connect to PubSub for channel points
       if (this.pointsService) {
         this.pointsService.connectBot(cfg.username, token).catch(() => {});
@@ -425,10 +413,6 @@ if (Date.now() - bot.lastMsgTime < 5000) return;
   }
   setGame(game: string): void {
     this.currentGame = game;
-  }
-  
-  setLive(live: boolean): void {
-    this.isLive = live;
-    console.log('[bot] isLive set to:', live);
+    this.ai.setGame(game);
   }
 }

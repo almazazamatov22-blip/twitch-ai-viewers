@@ -240,7 +240,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
     </div>
   </div>
   <div class="nav-r">
-    <div class="chip">Канал — <b id="mc">—</b></div>
+    <div class="chip">Канал —
+      <b id="mc" style="cursor:pointer;color:var(--pl);text-decoration:underline dotted;text-underline-offset:3px"
+         title="Нажми чтобы сменить канал" onclick="openChannelModal()">—</b>
+      <span style="font-size:10px;color:var(--tx3);margin-left:3px" title="Сменить канал" onclick="openChannelModal()" style="cursor:pointer">✎</span>
+    </div>
     <span class="sep">·</span>
     <div class="chip">Боты — <span class="bdg" id="ma">0</span></div>
     <span class="sep">·</span>
@@ -535,7 +539,69 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--tx);height:
   </div>
 </div>
 
-<div class="tw" id="toasts"></div>
+<!-- CHANNEL CHANGE MODAL -->
+<div class="ov" id="channel-modal" onclick="if(event.target===this)closeChannelModal()" style="display:none">
+  <div class="modal" style="width:360px" onclick="event.stopPropagation()">
+    <div class="mt">
+      <span>📺 Сменить канал</span>
+      <button class="mclose" onclick="closeChannelModal()">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--tx2);margin-bottom:12px;line-height:1.5">
+      Смена канала перезапустит ботов без деплоя.<br>
+      Текущий прогресс будет сохранён.
+    </div>
+    <div class="mf">
+      <label>Никнейм канала Twitch</label>
+      <input id="ch-inp" placeholder="twitchusername" style="font-size:14px"
+        onkeydown="if(event.key==='Enter')doChangeChannel()"/>
+    </div>
+    <div id="ch-err" style="font-size:11px;color:var(--rd);margin-top:-6px;margin-bottom:8px;display:none"></div>
+    <div class="mb">
+      <button class="bc" onclick="closeChannelModal()">Отмена</button>
+      <button class="bok" id="ch-btn" onclick="doChangeChannel()">🔄 Сменить</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openChannelModal(){
+  document.getElementById('ch-inp').value=channelName||'';
+  document.getElementById('ch-err').style.display='none';
+  document.getElementById('ch-btn').disabled=false;
+  document.getElementById('ch-btn').textContent='🔄 Сменить';
+  document.getElementById('channel-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('ch-inp').focus(),50);
+}
+function closeChannelModal(){
+  document.getElementById('channel-modal').style.display='none';
+}
+function doChangeChannel(){
+  const val=document.getElementById('ch-inp').value.trim().replace(/https?:\/\//g,'').replace(/.*twitch\.tv\//,'').replace(/\//g,'').toLowerCase();
+  if(!val){showChErr('Введите никнейм');return;}
+  if(val===channelName){showChErr('Это уже текущий канал');return;}
+  const btn=document.getElementById('ch-btn');
+  btn.disabled=true; btn.textContent='⏳ Переключаем...';
+  document.getElementById('ch-err').style.display='none';
+  socket.emit('set:twitch_channel',{channel:val});
+}
+function showChErr(msg){
+  const el=document.getElementById('ch-err');
+  el.textContent=msg; el.style.display='block';
+  const btn=document.getElementById('ch-btn');
+  btn.disabled=false; btn.textContent='🔄 Сменить';
+}
+socket.on('channel:changing', d=>{
+  toast('info','🔄 Переключаем на '+d.channel+'...');
+});
+socket.on('channel:changed', d=>{
+  closeChannelModal();
+  toast('ok','✅ Канал сменён на '+d.channel);
+});
+socket.on('channel:change_error', d=>{
+  showChErr(d.message||'Ошибка');
+  toast('err','❌ '+d.message);
+});
+</script>
 
 <script>
 const socket = io();

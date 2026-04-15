@@ -891,6 +891,34 @@ io.on('connection', socket => {
       console.log('[server] set:live', data.live);
     }
   });
+
+  // ── Смена основного канала без деплоя ────────────────────────────────────
+  socket.on('set:twitch_channel', async (data: { channel: string }) => {
+    const newChan = extractChannel(data.channel || '');
+    if (!newChan) {
+      socket.emit('channel:change_error', { message: 'Некорректное имя канала' });
+      return;
+    }
+    console.log('[server] Changing TWITCH_CHANNEL to:', newChan);
+    process.env.TWITCH_CHANNEL = newChan;
+    io.emit('channel:changing', { channel: newChan });
+    try {
+      // Сохраняем прогресс текущего канала
+      if (manager) {
+        const hist = manager.getHistoryForSave();
+        saved.botHistories = hist.histories;
+        saved.transcriptHistory = hist.transcripts;
+        saved.realChatHistory = hist.realChat;
+        saveToDisk(saved, currentChannel);
+      }
+      if (streamPoll) { clearInterval(streamPoll); streamPoll = null; }
+      await autoStart();
+      io.emit('channel:changed', { channel: newChan });
+      console.log('[server] Channel changed to:', newChan);
+    } catch (e: any) {
+      socket.emit('channel:change_error', { message: e.message });
+    }
+  });
 });
 
 // ── Auto-start ───────────────────────────────────────────────────────────────
